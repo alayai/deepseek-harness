@@ -6,7 +6,9 @@
     - img
   - tablist:
     - tab "Chat" [selected]
+    - button "Open Chat to the side"
     - tab "Trajectory"
+    - button "Open Trajectory to the side"
 - navigation "Turn navigation":
   - button "Jump to turn 1"
   - button "Jump to turn 2"

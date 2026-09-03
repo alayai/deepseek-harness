@@ -6,7 +6,9 @@
     - img
   - tablist:
     - tab "Chat" [selected]
+    - button "Open Chat to the side"
     - tab "Trajectory"
+    - button "Open Trajectory to the side"
 - text: Show the local preview URL. {{clock}}
 - button "Copy":
   - img

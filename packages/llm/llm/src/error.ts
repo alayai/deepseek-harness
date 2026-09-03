@@ -86,6 +86,42 @@ export function isContextWindowExceededError(detail: string): boolean {
 }
 
 /**
+ * Recognize a rejected request body: HTTP 413, gateway payload caps, and
+ * "request entity too large" pages. Adapters map these to
+ * {@link CONTEXT_WINDOW_EXCEEDED_CODE} so overflow recovery can shrink the
+ * request; generic retry must not resend the same body.
+ * @param detail - provider error code/type/message text joined into one string.
+ * @returns true when the detail identifies an oversized HTTP request body.
+ */
+export function isPayloadTooLargeError(detail: string): boolean {
+  return /\b413\b/.test(detail)
+    || /failed to buffer the request body:\s*length limit exceeded/i.test(detail)
+    || /(?:payload|request\s+(?:body|entity))\s+too\s+large/i.test(detail)
+}
+
+/** HTML documents and nginx-style error pages, not inline markup in a sentence. */
+function looksLikeHtml(text: string): boolean {
+  return /<!DOCTYPE\s+html/i.test(text)
+    || /<(?:html|head|body|title|center)\b/i.test(text)
+}
+
+/**
+ * Replace an HTML error page with a readable title so Chat does not render
+ * gateway markup. Non-HTML diagnostics pass through unchanged. Classification
+ * still uses the original detail; this helper is display-only.
+ * @param detail - provider error code/type/message text, possibly an HTML page.
+ * @returns the HTML `<title>` when present, otherwise tag-stripped text, or
+ *   the original detail when it is not an HTML document.
+ */
+export function sanitizeProviderErrorMessage(detail: string): string {
+  if (!looksLikeHtml(detail)) return detail
+  const title = /<title>([^<]*)<\/title>/i.exec(detail)?.[1]?.trim()
+  if (title !== undefined && title.length > 0) return title
+  const stripped = detail.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return stripped.length > 0 ? stripped : 'HTTP error'
+}
+
+/**
  * Recognize provider wording that identifies an exhausted account quota rather
  * than a transient request-rate limit.
  * @param detail - provider error code/type/message text joined into one string.

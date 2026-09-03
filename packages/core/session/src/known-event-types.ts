@@ -13,11 +13,14 @@
  * in `./types.ts`): such a log was likely written by a newer harness, and
  * silently skipping a required event would reconstruct a wrong session.
  * Downstream (out-of-repo) plugin events are outside this list by
- * construction. The persisted `SessionEvent.ignorable` marker is the
- * compatibility mechanism; event-name registration was rejected because
- * it does not classify omission safety and would make reads
- * composition-dependent. The rationale is in
- * `.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.md`.
+ * construction. The persistence read path also treats SessionEventMap
+ * members declared by currently mounted out-of-repo plugins as known.
+ * The persisted `SessionEvent.ignorable` marker remains the
+ * omission-safety mechanism; harvested names do not classify whether
+ * skipping an unknown event is safe. The rationale is in
+ * `.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.md`
+ * and
+ * `.agents/notes/implemented/architecture/2026-08-31-mounted-plugin-session-event-types.md`.
  */
 export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'agent-preset/selected',

@@ -24,6 +24,7 @@ import {
   validateStoredEvents,
 } from '../src/index.ts'
 import type { SessionLocation } from '../src/index.ts'
+import { registerHarvestedSessionEventTypes } from '../src/plugin-session-event-types.ts'
 import { meta } from './contract.ts'
 
 const LOCATION: SessionLocation = { kind: 'jsonl', path: '/store/session.jsonl' }
@@ -145,6 +146,19 @@ describe('validateStoredEvents', () => {
     ] as unknown as SessionEvent[]
     expect(validateStoredEvents(m, events)).toBe(events)
     expect(events[0]).toMatchObject({ type: 'foreign/telemetry', ignorable: true })
+  })
+
+  it('accepts a type harvested from a mounted out-of-repo plugin', () => {
+    const dispose = registerHarvestedSessionEventTypes(['lowcode/surface-open'])
+    try {
+      const m = meta('harvested-plugin')
+      const events = [
+        { type: 'lowcode/surface-open', seq: 0, time: 1, data: {} },
+      ] as unknown as SessionEvent[]
+      expect(validateStoredEvents(m, events)).toBe(events)
+    } finally {
+      dispose()
+    }
   })
 
   it('refuses the retired request/header "fallback" reason while accepting current headers', () => {

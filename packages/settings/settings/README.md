@@ -55,7 +55,7 @@ const theme = scope.get()              // deep-frozen resolved snapshot
 scope.update({ density: 'compact' })   // merges into the user section and persists
 ```
 
-Literal namespace arguments are checked by TypeScript against the lowercase letter, digit, and hyphen grammar; dynamically supplied strings receive the same validation at runtime. `ctx.settings.installSection(owner, ns, schema, entry, hooks)` packages the optional-service wiring for a consumer plugin: while a settings service exists it registers the namespace with the plugin's composition entry as `base`; when the service goes away the plugin falls back to its entry config and keeps working exactly as composed.
+Literal namespace arguments are checked by TypeScript against the lowercase letter, digit, and hyphen grammar; dynamically supplied strings receive the same validation at runtime. `settingsNamespace(name)` runs that check and returns a branded constant a plugin can register, describe, and pass to a configuration card. `installSettingsSection(ctx, ns, schema, entry, hooks)` injects `settings` when a provider is present and registers the namespace with the composition entry as `base`; when the provider is absent or later detaches, the plugin keeps that entry. The method form is `ctx.settings.installSection(owner, ns, schema, entry, hooks)`.
 
 ### Reading and observing values
 
@@ -97,7 +97,7 @@ This section explains the design decisions behind the service and points at the 
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Service Definition: namespace validation, registration, resolution, write queue, describe/redaction, events, `installSection` |
+| [`src/index.ts`](src/index.ts) | Service Definition: namespace validation, `settingsNamespace`, registration, resolution, write queue, describe/redaction, events, `installSection` / `installSettingsSection` |
 | [`src/redact.ts`](src/redact.ts) | `redactSecrets` walker: strip `role('secret')` fields and enumerate their slots |
 | [`src/types.ts`](src/types.ts) | Client-safe type surface: event declarations, `SettingsNamespace`, `SettingsUpdateSource` |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: `settings/updated` fires only for a registered namespace, only on a resolved-value change, with the authoritative value |

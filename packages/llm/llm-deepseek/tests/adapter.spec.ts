@@ -1414,12 +1414,16 @@ describe('DeepSeekAdapter against a mock server', () => {
     }
   })
 
-  it('classifies only context-capacity HTTP 400 details as context overflow', () => {
+  it('classifies HTTP 400 context-capacity details and HTTP 413 as context overflow', () => {
     expect(httpErrorCode(400, { message: 'request too large for model context' }))
+      .toBe(CONTEXT_WINDOW_EXCEEDED_CODE)
+    expect(httpErrorCode(400, { message: 'request body too large' }))
       .toBe(CONTEXT_WINDOW_EXCEEDED_CODE)
     expect(httpErrorCode(400, { message: 'invalid input: temperature exceeds maximum allowed value' }))
       .toBe('INVALID_REQUEST')
-    expect(httpErrorCode(413, { code: 'context_length_exceeded' })).toBe('INVALID_REQUEST')
+    expect(httpErrorCode(413, { code: 'context_length_exceeded' }))
+      .toBe(CONTEXT_WINDOW_EXCEEDED_CODE)
+    expect(httpErrorCode(413)).toBe(CONTEXT_WINDOW_EXCEEDED_CODE)
   })
 
   it('distinguishes terminal quota exhaustion from transient HTTP 429 throttling', () => {
@@ -1446,6 +1450,33 @@ describe('DeepSeekAdapter against a mock server', () => {
     if (result.finish.kind !== 'error') throw new Error('expected an error finish')
     expect(result.finish.failure.code).toBe('SERVER')
     expect(result.finish.failure.message).toMatch(/HTTP 502/)
+  })
+
+  it('classifies an HTML 413 gateway page as context overflow without leaking markup', async () => {
+    const nginx = [
+      '<html>',
+      '<head><title>413 Request Entity Too Large</title></head>',
+      '<body><center><h1>413 Request Entity Too Large</h1></center>',
+      '<hr><center>nginx/1.28.3</center></body>',
+      '</html>',
+    ].join(' ')
+    const server = await mockServer([{
+      kind: 'http-error',
+      status: 413,
+      body: nginx,
+      contentType: 'text/html',
+    }])
+    const ctx = await harness(server.url)
+    const result = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(result.finish).toMatchObject({
+      kind: 'error',
+      failure: {
+        code: CONTEXT_WINDOW_EXCEEDED_CODE,
+        status: 413,
+        message: '413 Request Entity Too Large',
+      },
+    })
+    expect(result.finish.kind === 'error' && result.finish.failure.message.includes('<html>')).toBe(false)
   })
 
   it('maps unusual statuses to HTTP_<status>', () => {

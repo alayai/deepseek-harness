@@ -71,5 +71,9 @@ declare module '@deepseek-ai/cordis' {
     conversation: import('./service.ts').IConversation
     /** Target-neutral Conversation registries and per-Session assembly. */
     uiConversation: import('./conversation/assembly.ts').UiConversation
+    /** Event Definition registry; same object as {@link UiConversation.events}. */
+    conversationEvents: import('./conversation/event-registry.ts').ConversationEventRegistry
+    /** View builder registry; same object as {@link UiConversation.views}. */
+    conversationViews: import('./conversation/view-registry.ts').ConversationViewRegistry
   }
 }

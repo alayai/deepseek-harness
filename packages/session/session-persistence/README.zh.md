@@ -62,7 +62,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 失败与恢复
 
-当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本构建不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`；已提交前缀中的损坏以 `SessionPersistenceCorruptionError` 拒绝。
+当前构建无法忠实解读的存储日志会以方向感知的错误被拒绝，绝不错读。`SESSION_FORMAT_VERSION` 保持 v0，本构建不提供格式迁移路径；更高版本会要求操作者升级 harness。解码器只接受下文点名的有限同版本记录变体。本进程不认识的事件类型会被拒绝，除非其信封标记为 `ignorable`，或当前已挂载的仓库外插件在 `SessionEventMap` 中声明了它（[已挂载插件会话事件类型](../../../.agents/notes/implemented/architecture/2026-08-31-mounted-plugin-session-event-types.zh.md)）；已提交前缀中的损坏以 `SessionPersistenceCorruptionError` 拒绝。
 
 -----
 
@@ -84,7 +84,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 - **撕裂的物理尾部绝不到达读取方。** 它属于一次从未完成的 append；写路径在第一次新 append 之前将其持久截断。
 - **无损 JSON 数据。** 批次与 header 经过共享的单遍校验并快照边界（`materializeAppendBatch`/`materializeCreateHeader`）；无法序列化的载荷在调用处被拒绝。
 - **持久性。** `append` 尽力而为地持久化；`flush`——逐句柄或服务级——是承诺存储并同时把空会话实体化的屏障。
-- **失败即关闭的读取。** `validateStoredEvents` 拒绝未知事件词汇与已废弃的预发布形态；`assertVersion` 拒绝外来格式版本。
+- **失败即关闭的读取。** `validateStoredEvents` 拒绝未知事件词汇（`ignorable` 事件以及从当前已挂载仓库外插件收获的 `SessionEventMap` 键除外）与已废弃的预发布形态；`assertVersion` 拒绝外来格式版本。
 - **每个后端实例单写者。** provider 的进程内认领在 `create`/`open('write')` 时取得，在句柄关闭时释放。
 
 ### 源码地图
@@ -94,6 +94,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 | [`src/index.ts`](src/index.ts) | 插件入口：抽象 `SessionPersistence` 服务与重新导出的 seam 词汇 |
 | [`src/handle.ts`](src/handle.ts) | `SessionHandle` 约定：read/append/flush/close 语义与新鲜度规则 |
 | [`src/storage-contract.ts`](src/storage-contract.ts) | 共享校验：版本门、失败即关闭词汇表、批次实体化、连续性 |
+| [`src/plugin-session-event-types.ts`](src/plugin-session-event-types.ts) | 从已挂载的仓库外 Loader 包收获 `SessionEventMap` 键 |
 | [`src/errors.ts`](src/errors.ts) | 稳定的句柄/所有权失败与格式拒绝 |
 | [`src/revision.ts`](src/revision.ts) | 带品牌类型的不透明修订值 token |
 | — | 不发布运行时不变式伴生入口；持久化正确性需要后端往返与崩溃尾部测试；本包不暴露可持续观察的进程内关系。 |
@@ -104,7 +105,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 ### 存储记录校验
 
-后端读取只校验当前 v0 记录且绝不重写它们；追加写入当前 v0（[理由](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.zh.md)）。每个后端在每条读取路径——句柄读取与写打开预热——上运行同一套 `storage-contract` 辅助函数，把未知事件类型作为 `SessionFormatUnsupportedError` 拒绝，把当前类型的已废弃载荷变体作为 `SessionPersistenceCorruptionError` 拒绝，并在后端为每个会话保留一份产物时附上原始日志的 `SessionLocation`。
+后端读取只校验当前 v0 记录且绝不重写它们；追加写入当前 v0（[理由](../../../.agents/notes/implemented/architecture/2026-08-30-retain-ignorable-external-session-events.zh.md)）。每个后端在每条读取路径——句柄读取与写打开预热——上运行同一套 `storage-contract` 辅助函数，把未知事件类型作为 `SessionFormatUnsupportedError` 拒绝（`ignorable` 或从已挂载仓库外插件的 `SessionEventMap` 收获的键除外，见[已挂载插件会话事件类型](../../../.agents/notes/implemented/architecture/2026-08-31-mounted-plugin-session-event-types.zh.md)），把当前类型的已废弃载荷变体作为 `SessionPersistenceCorruptionError` 拒绝，并在后端为每个会话保留一份产物时附上原始日志的 `SessionLocation`。
 
 </details>
 -----
@@ -116,6 +117,7 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 - [会话持久化子系统](../../../docs/subsystems/persistence.zh.md)——完整服务约定、句柄语义、flush 检查点、崩溃恢复与生成的 Cordis API。
 - [基于句柄的持久化 Agent Note](../../../.agents/notes/implemented/architecture/2026-08-27-handle-based-session-persistence.zh.md)——seam 设计及其所有权模型。
+- [已挂载插件会话事件类型](../../../.agents/notes/implemented/architecture/2026-08-31-mounted-plugin-session-event-types.zh.md)——从已挂载仓库外插件收获的 `SessionEventMap` 键。
 - [JSONL 持久化后端](../session-persistence-jsonl/README.zh.md)——随产品交付、按会话存储文件的后端。
 - [会话检查点策略](../session-checkpoint-policy/README.zh.md)——在语义边界上经由 `session/flush` 刷新的插件。
 - [会话包映射](../README.zh.md)——相邻的持久化、投影、标题与遥测包。

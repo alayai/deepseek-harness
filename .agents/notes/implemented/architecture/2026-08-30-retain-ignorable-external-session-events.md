@@ -28,4 +28,6 @@ The field is removable only after a replacement supports the current third-party
 
 ## Consequences
 
-Third-party informational events can remain reloadable when their stored records carry the explicit marker, while unknown required events still fail loudly. The field remains part of the public event envelope, JSONL representation, transport types, generated references, and their tests until a replacement satisfies the cutover condition.
+Third-party informational events can remain reloadable when their stored records carry the explicit marker, while unknown required events still fail loudly. The field remains part of the public event envelope, persistence schemas, transport types, generated references, and their tests until a replacement satisfies the cutover condition. Declaration-merge keys from a currently mounted out-of-repo plugin are a separate known-set union owned by [mounted plugin session event types](2026-08-31-mounted-plugin-session-event-types.md); that union does not classify omission safety and does not replace `ignorable`.
+
+SQLite advances from schema 19 to schema 20 because restoring the durable column changes the pre-release physical database format. The provider continues to reject other schema versions rather than migrating them.

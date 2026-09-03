@@ -57,6 +57,12 @@ describe('target-neutral Conversation apply wiring', () => {
     const b = await bench()
     expect(b.runtime.ctx.get('conversation')).toBeDefined()
     expect(b.runtime.ctx.get('uiConversation')).toBeDefined()
+    const events = b.runtime.ctx.uiConversation.events
+    const views = b.runtime.ctx.uiConversation.views
+    const aliasedEvents = b.runtime.ctx.get('conversationEvents') as { entries(): unknown }
+    const aliasedViews = b.runtime.ctx.get('conversationViews') as { entries(): unknown }
+    expect(aliasedEvents.entries()).toBe(events.entries())
+    expect(aliasedViews.entries()).toBe(views.entries())
     expect(b.runtime.slots.entries('conversation.view')).toHaveLength(0)
     await b.runtime.dispose()
   })

@@ -34,6 +34,7 @@ import { normalizeLlmFailure } from './adapter-failure.ts'
 import { normalizeApiKey } from './api-key.ts'
 import { contentHasImage, projectImagesForTextModel } from './content.ts'
 
+export { assertNever } from '@deepseek-ai/dsh-util-values'
 export * from './attribution.ts'
 export * from './brand.ts'
 export * from './error.ts'

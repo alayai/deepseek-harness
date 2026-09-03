@@ -63,6 +63,7 @@ After a successful mount, `ctx.llm.listProviders()` reports the registered route
 - **Expose and activate providers through configuration** — adapters declare configurable-provider routes plus a settings namespace, so configuration surfaces can activate dormant providers and edit connection facts without a restart.
 - **Discover and resolve models** — list the models an adapter advertises, interrogate an endpoint for the models it serves, and resolve one exact model's context window, output default, reasoning efforts, and input modalities.
 - **Validate call config** — an explicit or configured reasoning effort is checked against the exact model before any provider I/O, and an adapter-configured output cap is materialized when the request omits one.
+- **Exhaust a closed union from this package** — `assertNever` is exported so a switch over this package's closed types can import the helper from the same module as `HarnessError`.
 
 ### Failures and recovery
 

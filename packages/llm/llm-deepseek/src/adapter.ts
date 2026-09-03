@@ -8,7 +8,7 @@
  * @module dsh-llm-deepseek/adapter
  */
 
-import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, offloadedImageText, offloadRequestImagesWithPolicy, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, isPayloadTooLargeError, isQuotaExceededError, LlmAdapter, LlmError, offloadedImageText, offloadRequestImagesWithPolicy, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId, sanitizeProviderErrorMessage } from '@deepseek-ai/dsh-llm'
 import type {
   ContentBlock,
   GenerateOptions,
@@ -325,18 +325,22 @@ function requestId(headers: Headers): ReturnType<typeof ProviderRequestId> | und
 
 /**
  * Map an HTTP status to a stable LlmError code.
+ * HTTP 413 is overflow-recoverable (`CONTEXT_WINDOW_EXCEEDED`): the assembled
+ * body exceeded a gateway or provider size cap.
  * @param status - status of a non-2xx provider response.
  * @param error - parsed provider error body, when available.
  * @returns the normalized harness error code.
  */
 export function httpErrorCode(status: number, error?: WireError['error']): string {
   if (status === 401 || status === 403) return 'AUTH'
-  if (status === 413) return 'INVALID_REQUEST'
+  if (status === 413) return CONTEXT_WINDOW_EXCEEDED_CODE
   const detail = [error?.code, error?.type, error?.message].filter(Boolean).join(' ')
   if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
   if (status === 429) return 'RATE_LIMIT'
   if (status === 400) {
-    if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE
+    if (isContextWindowExceededError(detail) || isPayloadTooLargeError(detail)) {
+      return CONTEXT_WINDOW_EXCEEDED_CODE
+    }
     return 'INVALID_REQUEST'
   }
   if (status >= 500) return 'SERVER'
@@ -662,9 +666,12 @@ export class DeepSeekAdapter extends LlmAdapter {
         try {
           const parsed = JSON.parse(rawResponse) as WireError
           providerError = parsed.error
-          if (providerError?.message) message = providerError.message
+          if (providerError?.message) message = sanitizeProviderErrorMessage(providerError.message)
         } catch {
-          // The HTTP status remains authoritative when a gateway returns malformed JSON.
+          // A gateway HTML page keeps a readable title; plain-text bodies keep
+          // the status-line message so "Bad Gateway" does not replace HTTP 502.
+          const sanitized = sanitizeProviderErrorMessage(rawResponse)
+          if (sanitized !== rawResponse && sanitized.length > 0) message = sanitized
         }
         const detail = [providerError?.code, providerError?.type, providerError?.message]
           .filter((field): field is string => typeof field === 'string')

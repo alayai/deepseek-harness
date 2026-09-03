@@ -40,6 +40,7 @@ The boot page uses plain DOM and local CSS, so bundle and plugin-activation fail
 ### The shared module table
 
 `PLATFORM_MODULES` (in `src/platform.ts`) names the shell-seeded shared modules — React, Cordis, and static UI libraries — and together with `PRELOADED_CLIENT_EXTERNALS` (the parser-preloaded runtime row) defines the implicit external baseline every dynamic bundle resolves against. `dsh.client.external` adds only exact non-baseline requests; see [shared modules and the module graph](../AGENTS.md#shared-modules-and-the-module-graph).
+The table also seeds `@deepseek-ai/dsh-client-runtime` and `@deepseek-ai/dsh-client-runtime/client` as the same identity as `@deepseek-ai/dsh-client-store`, so a bundle that requires either specifier receives `createSnapshotStore` from that identity.
 
 ### Configuration
 

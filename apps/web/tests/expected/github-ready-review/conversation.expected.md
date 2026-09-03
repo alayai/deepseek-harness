@@ -19,7 +19,9 @@
     - img
   - tablist:
     - tab "Chat" [selected]
+    - button "Open Chat to the side"
     - tab "Trajectory"
+    - button "Open Trajectory to the side"
 - button "System prompt":
   - img
   - img

@@ -204,6 +204,8 @@ function mount(
           renderSlot={renderSlot as never}
           open={open}
           selectView={(view) => { store.actions.setView(view) }}
+          openSideView={(view) => { store.actions.setSideView(view) }}
+          closeSideView={() => { store.actions.clearSideView() }}
           t={t}
         />
       )
@@ -229,6 +231,7 @@ function mount(
           renderSlot={renderSlot as never}
           bindDraftMirror={write => wiring.bindMirror(write)}
           openView={(view, focus) => { store.actions.openView(view, focus) }}
+          t={t}
         />
       )
     }
@@ -565,6 +568,54 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.queryByTestId('view-new-view')).toBeNull()
     expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('tab', { name: 'New view' }).getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('pins a second View to the right-hand pane beside Chat', () => {
+    const viewTabs: ViewTab[] = [
+      { id: 'chat', label: 'Chat' },
+      { id: 'trajectory', label: 'Trajectory' },
+      { id: 'lowcode', label: 'Elite-Lowcode' },
+    ]
+    const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs })
+    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.queryByTestId('view-lowcode')).toBeNull()
+
+    fireEvent.click(b.view.getByRole('button', { name: '在右侧打开 Elite-Lowcode' }))
+    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getByTestId('view-lowcode')).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
+    expect(b.view.getByRole('button', { name: '关闭右侧的 Elite-Lowcode' }).getAttribute('aria-pressed')).toBe('true')
+    expect(b.view.container.querySelector('[data-conversation-split]')).not.toBeNull()
+
+    fireEvent.click(b.view.getByRole('tab', { name: 'Elite-Lowcode' }))
+    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getByTestId('view-lowcode')).toBeTruthy()
+
+    fireEvent.click(b.view.getByRole('tab', { name: 'Trajectory' }))
+    expect(b.view.queryByTestId('view-chat')).toBeNull()
+    expect(b.view.getByTestId('view-trajectory')).toBeTruthy()
+    expect(b.view.getByTestId('view-lowcode')).toBeTruthy()
+
+    fireEvent.click(b.view.getByRole('button', { name: '关闭右侧的 Elite-Lowcode' }))
+    expect(b.view.queryByTestId('view-lowcode')).toBeNull()
+    expect(b.view.getByTestId('view-trajectory')).toBeTruthy()
+    expect(b.view.container.querySelector('[data-conversation-split]')).toBeNull()
+  })
+
+  it('docks the current primary View and falls back to Chat on the left', () => {
+    const viewTabs: ViewTab[] = [
+      { id: 'chat', label: 'Chat' },
+      { id: 'lowcode', label: 'Elite-Lowcode' },
+    ]
+    const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs })
+    fireEvent.click(b.view.getByRole('tab', { name: 'Elite-Lowcode' }))
+    expect(b.view.getByTestId('view-lowcode')).toBeTruthy()
+    expect(b.view.queryByTestId('view-chat')).toBeNull()
+
+    fireEvent.click(b.view.getByRole('button', { name: '在右侧打开 Elite-Lowcode' }))
+    expect(b.view.getByTestId('view-chat')).toBeTruthy()
+    expect(b.view.getByTestId('view-lowcode')).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('rolls the pending workspace label back when switching fails', async () => {

@@ -16,7 +16,7 @@ import type {
   ConversationSessionInjected,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
-import { createConversationStore, readConversationViewPreference } from './stores.ts'
+import { createConversationStore, readConversationLayoutPreference } from './stores.ts'
 import { ConversationController, UnsupportedImageMediaTypeError } from './service.ts'
 import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
@@ -30,7 +30,7 @@ import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
-import { resolveActiveView } from './view-selection.ts'
+import { resolveActiveView, resolveSideView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
 
@@ -135,7 +135,12 @@ export function apply(ctx: Context): void {
     if (active !== undefined) uiConversation.binding(sessionId).activate(active.id)
   }
   const restoreView = (sessionId: SessionId): void => {
-    activateView(sessionId, readConversationViewPreference(sessionId))
+    const tabs = viewTabs()
+    const preference = readConversationLayoutPreference(sessionId)
+    const primary = resolveActiveView(tabs, preference.view)
+    if (primary !== undefined) uiConversation.binding(sessionId).activate(primary.id)
+    const side = resolveSideView(tabs, preference.sideView, primary?.id)
+    if (side !== undefined) uiConversation.binding(sessionId).activate(side.id)
   }
   const restoreCurrentView = (): void => {
     const sessionId = sessions.list.getSnapshot().current
@@ -235,6 +240,7 @@ export function apply(ctx: Context): void {
 
   const registerConversationSession = () => slots.register({
     name: 'conversation.session',
+    locale: NS,
     children: {
       'conversation.view': { kind: 'list', scope: 'session' },
     },
@@ -265,6 +271,12 @@ export function apply(ctx: Context): void {
         activateView(sessionId, view)
         actions.setView(view)
       },
+      openSideView: (view) => {
+        actions.setSideView(view)
+        activateView(sessionId, view)
+        activateView(sessionId, readConversationLayoutPreference(sessionId).view)
+      },
+      closeSideView: () => { actions.clearSideView() },
     }),
   }, ConversationSessionHeader)
 

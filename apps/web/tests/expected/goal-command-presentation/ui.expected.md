@@ -8,7 +8,9 @@
     - img
   - tablist:
     - tab "Chat" [selected]
+    - button "Open Chat to the side"
     - tab "Trajectory"
+    - button "Open Trajectory to the side"
 - group "Command input": /goal
 - 'button "goal No goal is currently set. Usage: /goal [<objective>|clear|edit <objective>|pause|resume]"':
   - img

@@ -42,6 +42,18 @@ function parseSettingsNamespace(value: string): SettingsNamespace {
   return value as SettingsNamespace
 }
 
+/**
+ * Brand a settings namespace after checking the lowercase hyphenated grammar.
+ * @param value - candidate namespace.
+ * @returns the branded namespace.
+ * @throws {TypeError} when `value` is not a lowercase hyphenated identifier.
+ */
+export function settingsNamespace<const Namespace extends string>(
+  value: Namespace & SettingsNamespaceInput<Namespace>,
+): SettingsNamespace {
+  return parseSettingsNamespace(value)
+}
+
 /** When a namespace's changes take effect for its owner. */
 export type SettingsApplies = 'live' | 'restart'
 
@@ -888,6 +900,29 @@ export interface SettingsSectionHooks<T> {
    * @param value - the resolved section, schema-valid by construction.
    */
   validate?: (value: T) => void
+}
+
+/**
+ * Wire an optional-settings consumer: register its namespace while a provider
+ * is present, and fall back to the composition entry when the provider detaches.
+ * @param ctx - consumer context; used as both the inject owner and the section owner.
+ * @param ns - consumer-owned settings namespace.
+ * @param schema - schema resolving the namespace.
+ * @param entry - composition entry used as the base and fallback value.
+ * @param hooks - source sink, change notification, and optional validation.
+ * @throws {TypeError} when `ns` is not a lowercase hyphenated identifier.
+ */
+export function installSettingsSection<const Namespace extends string, T>(
+  ctx: Context,
+  ns: Namespace & SettingsNamespaceInput<Namespace>,
+  schema: z<T>,
+  entry: T,
+  hooks: SettingsSectionHooks<T>,
+): void {
+  const parsed = parseSettingsNamespace(ns)
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, parsed, schema, entry, hooks)
+  })
 }
 
 export default SettingsProvider

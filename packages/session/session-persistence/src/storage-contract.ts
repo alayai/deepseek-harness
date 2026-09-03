@@ -7,7 +7,6 @@
 
 import {
   adoptSessionEvent,
-  KNOWN_SESSION_EVENT_TYPES,
   SESSION_FORMAT_VERSION,
 } from '@deepseek-ai/dsh-session'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
@@ -18,6 +17,7 @@ import {
   sessionFormatVersionRefusal,
   type SessionLocation,
 } from './errors.ts'
+import { isKnownStoredSessionEventType } from './plugin-session-event-types.ts'
 
 /** Build a format refusal that points at the raw artifact when the backend has one. */
 function unsupported(reason: string, location: SessionLocation | undefined): SessionFormatUnsupportedError {
@@ -51,10 +51,12 @@ export function assertVersion(meta: SessionHeader, location?: SessionLocation): 
 
 /**
  * Validate one exclusively owned stored event array in place: adopt each
- * record (validating and freezing it) and refuse any event type this build
+ * record (validating and freezing it) and refuse any event type this process
  * does not know, unless its writer marked it `ignorable: true` — silently
  * skipping an unknown required event could reconstruct a wrong session (the
- * envelope contract on `SessionEvent.ignorable`). Both newer vocabularies and
+ * envelope contract on `SessionEvent.ignorable`). Known types are the
+ * generated repository catalog plus `SessionEventMap` keys harvested from
+ * currently mounted out-of-repo plugins. Both newer vocabularies and
  * retired pre-release shapes refuse here; this build ships no migration.
  * @param meta - the stored header the events belong to.
  * @param events - exclusively owned decoded events; validated in place.
@@ -69,7 +71,7 @@ export function validateStoredEvents(
   location?: SessionLocation,
 ): SessionEvent[] {
   for (const event of events) {
-    if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
+    if (!isKnownStoredSessionEventType(event.type) && event.ignorable !== true) {
       throw unsupported(
         `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,
         location,

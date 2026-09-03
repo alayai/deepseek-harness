@@ -205,6 +205,11 @@ describe('assertNever', () => {
     expect(() => assertNever(undefined as never)).toThrow('unreachable variant: undefined')
   })
 
+  it('is exported from @deepseek-ai/dsh-llm', async () => {
+    const { assertNever } = await import('../src/index.ts')
+    expect(() => assertNever(undefined as never)).toThrow('unreachable variant: undefined')
+  })
+
   it('BlockAssembler.push rejects chunks outside the closed StreamChunk union', () => {
     const assembler = new BlockAssembler()
     expect(() => { assembler.push({ type: 'rogue-chunk' } as unknown as StreamChunk) })

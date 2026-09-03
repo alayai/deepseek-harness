@@ -129,6 +129,15 @@ describe('Conversation inject API', () => {
     expect(activate).toHaveBeenLastCalledWith('chat')
     expect(header.instance.store.getSnapshot().view).toBe('chat')
 
+    header.injected.openSideView('trajectory')
+    expect(activate).toHaveBeenCalledWith('trajectory')
+    expect(header.instance.store.getSnapshot()).toMatchObject({
+      view: 'chat',
+      sideView: 'trajectory',
+    })
+    header.injected.closeSideView()
+    expect(header.instance.store.getSnapshot().sideView).toBeNull()
+
     removeTrajectory()
     removeChat()
     await b.runtime.dispose()

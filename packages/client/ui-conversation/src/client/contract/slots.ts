@@ -113,7 +113,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       owner: ConversationHeaderActionOwnerProps
     }
-    /** Registered Conversation target Views, rendered one at a time. */
+    /** Registered Conversation target Views; the shell renders the primary View and an optional side View. */
     'conversation.view': { kind: 'list'; scope: 'session'; owner: ConvViewOwnerProps }
     /** Selector-routed replacements for the current Session's resident composer. */
     'conversation.composer': { kind: 'chain'; scope: 'session'; owner: ComposerChainProps }
@@ -236,8 +236,12 @@ export interface ConversationSessionHeaderInjected {
   readonly hooks: { readonly conversationViews: ObservableSnapshot<readonly ViewTab[]> }
   /** Select a Session through the Session Controller. */
   open: (sessionId: SessionId) => void
-  /** Select and activate one registered Conversation View. */
+  /** Select and activate one registered Conversation View as the primary pane. */
   selectView: (view: string) => void
+  /** Pin a registered Conversation View in the right-hand pane. */
+  openSideView: (view: string) => void
+  /** Close the right-hand pane without changing the primary View. */
+  closeSideView: () => void
 }
 
 /** Owner share of the resident composer bar. */
@@ -337,6 +341,7 @@ export type ConversationSessionSlotProps =
   & PropsRenderSlots<'conversation.view'>
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionInjected>
+  & PropsLocale<'conversation'>
 
 /** Full props of the strict Session header. */
 export type ConversationSessionHeaderSlotProps =

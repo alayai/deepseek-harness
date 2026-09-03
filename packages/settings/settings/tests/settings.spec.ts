@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SettingsProvider, SettingsConflictError, type SettingsNamespace, type SettingsScope, type SettingsUpdateSource } from '../src/index.ts'
+import { SettingsProvider, SettingsConflictError, settingsNamespace, installSettingsSection, type SettingsNamespace, type SettingsScope, type SettingsUpdateSource } from '../src/index.ts'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import { MemorySettings } from './memory.ts'
 
@@ -80,6 +80,12 @@ describe('settings namespace validation', () => {
   it.each(['', 'UI', '9lives', 'a_b', '-lead'])('rejects %j at the service', async (value) => {
     const { ctx } = await boot()
     expect(() => ctx.settings.register(value, ThemeSchema)).toThrow(TypeError)
+  })
+
+  it('brands a valid namespace and rejects an invalid one', () => {
+    expect(settingsNamespace('ui-theme')).toBe('ui-theme')
+    const invalid: string = 'UI'
+    expect(() => settingsNamespace(invalid)).toThrow(TypeError)
   })
 })
 
@@ -700,6 +706,45 @@ describe('watch', () => {
 describe('SettingsProvider.installSection', () => {
   const HelperSchema: z<{ theme: string }> = z.object({
     theme: z.string().default('default'),
+  })
+
+  it('installSettingsSection injects the provider and drives the source', async () => {
+    const ctx = new Context()
+    const entry = { theme: 'entry' }
+    let current: () => { theme: string } = () => entry
+    let changes = 0
+    installSettingsSection(ctx, 'helper-ns', HelperSchema, entry, {
+      validate: (value) => {
+        if (value.theme.length === 0) throw new Error('theme is empty')
+      },
+      setSource: (source) => {
+        current = source
+      },
+      onChange: () => {
+        changes += 1
+      },
+    })
+    expect(current()).toEqual({ theme: 'entry' })
+    expect(changes).toBe(0)
+
+    const fiber = ctx.plugin(MemorySettings, { doc: { 'helper-ns': { theme: 'user' } } })
+    await fiber
+    await vi.waitFor(() => {
+      expect(current()).toEqual({ theme: 'user' })
+    })
+    expect(changes).toBe(1)
+
+    await ctx.settings.update('helper-ns', { theme: 'live' })
+    await vi.waitFor(() => {
+      expect(changes).toBe(2)
+    })
+    expect(current()).toEqual({ theme: 'live' })
+
+    await fiber.dispose()
+    await vi.waitFor(() => {
+      expect(changes).toBe(3)
+    })
+    expect(current()).toEqual({ theme: 'entry' })
   })
 
   it('drives the source through attach, live commits, and detach', async () => {

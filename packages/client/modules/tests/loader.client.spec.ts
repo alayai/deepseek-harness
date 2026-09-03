@@ -251,6 +251,17 @@ describe('require resolution', () => {
     expect(b.loader.loadCache.has('react')).toBe(false)
   })
 
+  it('require answers an exact /client seed word without a graph row', async () => {
+    const store = { createSnapshotStore: () => 'store' }
+    const specifier = '@deepseek-ai/dsh-client-runtime/client'
+    const b = bench([row('plugin')], {
+      plugin: req => ({ dep: req(specifier) }),
+    }, { seed: { [specifier]: store } })
+    const exports = await b.loader.import('plugin', '', {})
+    expect((exports as { dep: unknown }).dep).toBe(store)
+    expect(b.loader.loadCache.has('@deepseek-ai/dsh-client-runtime')).toBe(false)
+  })
+
   it('require answers an already-materialized module from the cache', async () => {
     let built = 0
     const b = bench([row('a'), row('c')], {

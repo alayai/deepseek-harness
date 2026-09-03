@@ -24,7 +24,7 @@ Chat 与 Trajectory 可以识别同一个持久 event family，但各自保留�
 
 每个 Session 都保留单调增长的 active target 集合。创建或读取 target source 不会激活它。shell 会显式激活持久化选择或新选择的 View，其他消费者则通过 target source 的首个订阅激活 target。首次激活会创建该 target 的 builder，并从当前按 target 索引的 Context 调用一次 `replace()`。后续 flush 对每个 active target 调用 `apply()`，取消订阅不会移除 target。
 
-shell 拥有 View 选择，并在 binding 创建、被选为 current 或 View roster 变化时，于渲染前解析已注册的偏好 View 或 Chat fallback。assembler 只接收解析后的 target id，不自行选择 Chat 或其他默认 target。第三方 View 使用相同的选择与激活操作。
+shell 拥有 View 选择，并在 binding 创建、被选为 current 或 View roster 变化时，于渲染前解析已注册的偏好 View 或 Chat fallback。标签可以把第二个已注册 View 钉到右侧栏；assembler 随后分别接收每个可见 target id。assembler 不自行选择 Chat 或其他默认 target。第三方 View 使用相同的选择、侧边栏与激活操作。
 
 ## 可回放 event family
 

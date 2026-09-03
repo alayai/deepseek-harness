@@ -6,12 +6,14 @@ import LlmRuntime, {
   GenerateOptions,
   HarnessError,
   isContextWindowExceededError,
+  isPayloadTooLargeError,
   isQuotaExceededError,
   LlmAdapter,
   LlmError,
   ProviderRequestId,
   ReasoningEffortId,
   resolveRetryPolicy,
+  sanitizeProviderErrorMessage,
   StreamChunk,
   createMessage,
   createUserMessage,
@@ -115,6 +117,35 @@ describe('LlmRuntime', () => {
     expect(isContextWindowExceededError('invalid input: temperature exceeds maximum allowed value')).toBe(false)
     expect(isContextWindowExceededError('input exceeds maximum allowed value')).toBe(false)
     expect(isContextWindowExceededError('context window size must be positive')).toBe(false)
+  })
+
+  it('recognizes HTTP 413 and gateway payload-cap wording as request-body overflow', () => {
+    expect(isPayloadTooLargeError('HTTP 413: Payload Too Large')).toBe(true)
+    expect(isPayloadTooLargeError('Failed to buffer the request body: length limit exceeded')).toBe(true)
+    expect(isPayloadTooLargeError('request body too large')).toBe(true)
+    expect(isPayloadTooLargeError('413 Request Entity Too Large')).toBe(true)
+    expect(isPayloadTooLargeError('<title>413 Request Entity Too Large</title>')).toBe(true)
+  })
+
+  it('does not treat unrelated length-limit wording as a payload-cap failure', () => {
+    expect(isPayloadTooLargeError('vector length limit exceeded')).toBe(false)
+    expect(isPayloadTooLargeError('HTTP 400: invalid request')).toBe(false)
+    expect(isContextWindowExceededError('HTTP 413: Payload Too Large')).toBe(false)
+  })
+
+  it('replaces HTML error pages with a readable title and leaves plain diagnostics unchanged', () => {
+    const nginx = [
+      '<html>',
+      '<head><title>413 Request Entity Too Large</title></head>',
+      '<body><center><h1>413 Request Entity Too Large</h1></center>',
+      '<hr><center>nginx/1.28.3</center></body>',
+      '</html>',
+    ].join(' ')
+    expect(sanitizeProviderErrorMessage(nginx)).toBe('413 Request Entity Too Large')
+    expect(sanitizeProviderErrorMessage('HTTP 413: Payload Too Large'))
+      .toBe('HTTP 413: Payload Too Large')
+    expect(sanitizeProviderErrorMessage('<html><body>gateway rejected the request</body></html>'))
+      .toBe('gateway rejected the request')
   })
 
   it('distinguishes exhausted account quota from transient rate limiting', () => {
@@ -384,7 +415,6 @@ describe('LlmRuntime', () => {
           [Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
             return {
               // Third-party adapters can reject with arbitrary values.
-              // oxlint-disable-next-line typescript/prefer-promise-reject-errors
               next: () => Promise.reject('plain provider failure'),
             }
           },

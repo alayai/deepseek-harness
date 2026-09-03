@@ -31,6 +31,10 @@ export function getStaticModules(): Record<string, unknown> {
     'react-dom/client': ReactDomClient,
     '@deepseek-ai/cordis': Cordis,
     '@deepseek-ai/dsh-client-store': ClientStore,
+    // Exact plugin-facing store specifiers: installed bundles require these
+    // for createSnapshotStore; seed matching is exact, including `/client`.
+    '@deepseek-ai/dsh-client-runtime': ClientStore,
+    '@deepseek-ai/dsh-client-runtime/client': ClientStore,
     '@deepseek-ai/dsh-client-ui-slots': UiSlots,
     '@deepseek-ai/dsh-client-ui-primitives': UiPrimitives,
   } satisfies Record<PlatformModule, unknown>

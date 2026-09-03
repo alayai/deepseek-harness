@@ -151,9 +151,15 @@
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 36px;
+  gap: 24px;
   margin-top: 4px;
   padding-left: 8px;
+}
+
+.tabCluster {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 /* figma .Tab 34:11442: 13/16 text (figma wt510, rendered 500), gap 8 to the 2px bar. */
@@ -189,6 +195,36 @@
 
 .tabActive::after {
   background: var(--dsw-alias-state-business-primary);
+}
+
+.tabDocked {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.tabSide {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.tabSide:hover,
+.tabSide:focus-visible,
+.tabSide[aria-pressed='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.tabSideIcon {
+  transform: scaleX(-1);
 }
 
 .viewArea {
@@ -323,6 +359,79 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.sideMount {
+  display: none;
+}
+
+.body[data-conversation-split] {
+  display: grid;
+  grid-template-columns:
+    minmax(240px, var(--dsh-view-split-primary, 1fr))
+    minmax(240px, var(--dsh-view-split-side, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.body[data-conversation-split] .scrollBody {
+  min-width: 0;
+  min-height: 0;
+  --dsh-chat-content-width: min(100%, 920px);
+  --dsh-composer-card-max-width: 100%;
+}
+
+.body[data-conversation-split] .sideMount {
+  display: block;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.body[data-conversation-split] .widthHandle {
+  display: none;
+}
+
+.viewPaneSide {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viewPaneSide > * {
+  height: 100%;
+  min-height: 0;
+}
+
+.viewSplitHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.viewSplitHandle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 32px;
+  border-radius: 3px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+
+.viewSplitHandle:hover::after,
+.viewSplitHandle[data-dragging]::after {
+  opacity: 1;
 }
 
 .scrollBody {
