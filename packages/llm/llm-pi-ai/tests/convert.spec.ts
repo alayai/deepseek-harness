@@ -465,10 +465,10 @@ describe('toPiContext', () => {
       model: 'gpt-5.5',
       content: [{ type: 'thinking', thinking: 'private chain of thought', thinkingSignature: JSON.stringify(reasoningItem) }],
     }))
-    expect(state.blocks[0]).toEqual({
+    expect(state.blocks).toEqual([{
       type: 'reasoning',
       thinkingSignature: JSON.stringify({ type: 'reasoning', id: 'rs_abc', encrypted_content: 'enc-blob' }),
-    })
+    }])
 
     const storedWithSummary = {
       ...state,
@@ -503,7 +503,7 @@ describe('toPiContext', () => {
     const state = toPiReplayState(assistant({
       content: [{ type: 'thinking', thinking: 'private reasoning', thinkingSignature: signature }],
     }))
-    expect(state.blocks[0]).toEqual({ type: 'reasoning', thinkingSignature: signature })
+    expect(state.blocks).toEqual([{ type: 'reasoning', thinkingSignature: signature }])
   })
 
   it('keeps a reasoning item that has no id or encrypted content', () => {
@@ -514,10 +514,10 @@ describe('toPiContext', () => {
         thinkingSignature: JSON.stringify({ type: 'reasoning', id: '', encrypted_content: '', summary: ['drop'] }),
       }],
     }))
-    expect(emptyFields.blocks[0]).toEqual({
+    expect(emptyFields.blocks).toEqual([{
       type: 'reasoning',
       thinkingSignature: JSON.stringify({ type: 'reasoning' }),
-    })
+    }])
     const missingFields = toPiReplayState(assistant({
       content: [{
         type: 'thinking',
@@ -525,10 +525,10 @@ describe('toPiContext', () => {
         thinkingSignature: JSON.stringify({ type: 'reasoning', summary: ['drop'] }),
       }],
     }))
-    expect(missingFields.blocks[0]).toEqual({
+    expect(missingFields.blocks).toEqual([{
       type: 'reasoning',
       thinkingSignature: JSON.stringify({ type: 'reasoning' }),
-    })
+    }])
   })
 
   it('treats encrypted_content without a type as a reasoning item', () => {
@@ -539,10 +539,10 @@ describe('toPiContext', () => {
         thinkingSignature: JSON.stringify({ encrypted_content: 'blob', summary: 'drop' }),
       }],
     }))
-    expect(state.blocks[0]).toEqual({
+    expect(state.blocks).toEqual([{
       type: 'reasoning',
       thinkingSignature: JSON.stringify({ type: 'reasoning', encrypted_content: 'blob' }),
-    })
+    }])
   })
 
   it('degrades unsupported replay-state versions to provider-neutral history', () => {
