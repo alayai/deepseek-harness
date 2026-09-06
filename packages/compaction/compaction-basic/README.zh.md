@@ -186,7 +186,7 @@ This is an automatically generated checkpoint condensing an earlier span of the 
 ##### 压缩指令（最终 user 消息）
 
 ```markdown
-You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.
+Compact the conversation ABOVE into a structured checkpoint so this session can continue without losing essential context.
 
 Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.
 

@@ -62,6 +62,33 @@ function emptyPiUsage(): PiUsage {
 }
 
 /**
+ * Keep only the OpenAI Responses fields a later `store: false` request may
+ * send. `summary` and other display text are stripped because the provider's
+ * input classifier treats replayed reasoning summaries as chain-of-thought
+ * injection after a few tool rounds. Completions field-name signatures and
+ * any non-reasoning JSON stay unchanged.
+ * @param signature - durable `thinkingSignature` from a pi-ai thinking block.
+ * @returns the same string, or a reasoning item reduced to `type`/`id`/`encrypted_content`.
+ */
+function sanitizeThinkingSignature(signature: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(signature)
+  } catch {
+    return signature
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return signature
+  const item = parsed as Record<string, unknown>
+  if (item['type'] !== 'reasoning' && typeof item['encrypted_content'] !== 'string') return signature
+  const sanitized: Record<string, unknown> = { type: 'reasoning' }
+  if (typeof item['id'] === 'string' && item['id'].length > 0) sanitized['id'] = item['id']
+  if (typeof item['encrypted_content'] === 'string' && item['encrypted_content'].length > 0) {
+    sanitized['encrypted_content'] = item['encrypted_content']
+  }
+  return JSON.stringify(sanitized)
+}
+
+/**
  * Project a successful pi-ai response into the minimal durable replay state.
  * The per-block half is index-aligned with the streamed blocks (pi-ai content
  * order), so `BlockAssembler` prunes an entry with its block whenever assembly
@@ -90,7 +117,9 @@ export function toPiReplayState(message: AssistantMessage): ReplayEnvelope {
         }
         case 'thinking': return {
           type: 'reasoning',
-          ...block.thinkingSignature === undefined ? {} : { thinkingSignature: block.thinkingSignature },
+          ...block.thinkingSignature === undefined
+            ? {}
+            : { thinkingSignature: sanitizeThinkingSignature(block.thinkingSignature) },
           ...block.redacted === undefined ? {} : { redacted: block.redacted },
         }
         case 'toolCall': return {
@@ -147,7 +176,11 @@ function foreignAssistant(message: Message): AssistantMessage {
   for (const block of message.content) {
     switch (block.type) {
       case 'text': content.push({ type: 'text', text: block.text }); break
-      case 'reasoning': content.push({ type: 'thinking', thinking: block.text }); break
+      case 'reasoning':
+        // Unsigned thinking becomes assistant text on foreign replay, and
+        // OpenAI's input classifier flags that plaintext as chain-of-thought
+        // injection once several assistant turns have accumulated.
+        break
       case 'tool-call': content.push({
         type: 'toolCall',
         id: block.id,
@@ -193,7 +226,9 @@ function replayedAssistant(message: Message, source: ModelMessageSource, rawStat
       case 'reasoning': return {
         type: 'thinking',
         thinking: block.text,
-        ...replay.type === 'reasoning' && replay.thinkingSignature !== undefined ? { thinkingSignature: replay.thinkingSignature } : {},
+        ...replay.type === 'reasoning' && replay.thinkingSignature !== undefined
+          ? { thinkingSignature: sanitizeThinkingSignature(replay.thinkingSignature) }
+          : {},
         ...replay.type === 'reasoning' && replay.redacted !== undefined ? { redacted: replay.redacted } : {},
       }
       case 'tool-call': return {

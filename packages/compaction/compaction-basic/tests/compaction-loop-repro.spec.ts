@@ -106,7 +106,7 @@ class OverflowRecoveryAdapter extends LlmAdapter {
     const trailing = options.messages.at(-1)?.content
       .map(block => (block.type === 'text' ? block.text : ''))
       .join('') ?? ''
-    if (trailing.includes('acting as a compaction engine')) {
+    if (trailing.includes('Compact the conversation ABOVE')) {
       this.summaryRequests.push(options)
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'block-end', index: 0, block: { type: 'text', text: 'RECOVERY CHECKPOINT' } }

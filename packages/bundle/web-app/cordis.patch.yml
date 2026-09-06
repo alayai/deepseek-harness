@@ -220,6 +220,7 @@
     # Floating online 3D preview for the image-inspired rack-and-pinion actuator model.
     - id: ui-cad-preview
       name: '@deepseek-ai/dsh-client-ui-cad-preview'
+      disabled: true
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'

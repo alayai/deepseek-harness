@@ -29,7 +29,7 @@ const SUMMARY_CLOSE_TAG = '</compacted-summary>'
  * request, so the provider's KV cache is reused instead of invalidated.
  */
 const COMPACTION_INSTRUCTION = [
-  'You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.',
+  'Compact the conversation ABOVE into a structured checkpoint so this session can continue without losing essential context.',
   '',
   'Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.',
   '',

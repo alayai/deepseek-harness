@@ -44,7 +44,13 @@ function classifyPiAiError(message: string): string {
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
   // A rejected request body is overflow-recoverable, not a generic retry.
+  /* v8 ignore next -- mapStopReason already maps payload-too-large wording to CONTEXT_WINDOW_EXCEEDED before this classifier runs */
   if (isPayloadTooLargeError(message)) return CONTEXT_WINDOW_EXCEEDED_CODE
+  // OpenAI reasoning models reject replayed CoT-like input with this wording
+  // and no HTTP status; it is a permanent 400-class refusal, not PI_AI_ERROR.
+  if (/invalid_prompt|flagged as potentially violating (?:our )?usage policy/i.test(message)) {
+    return 'INVALID_REQUEST'
+  }
   if (/\b400\b|invalid.?request/i.test(message)) return 'INVALID_REQUEST'
   if (/\b5\d\d\b/.test(message)) return 'SERVER'
   if (/\btime(?:d)?\s*out\b|timeout/i.test(message)) return 'TIMEOUT'

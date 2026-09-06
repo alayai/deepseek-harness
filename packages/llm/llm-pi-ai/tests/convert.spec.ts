@@ -199,7 +199,7 @@ describe('toPiContext', () => {
     })).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CONTENT' }))
   })
 
-  it('maps assistant text/reasoning/tool-call blocks', () => {
+  it('maps assistant text and tool-call blocks and omits unsigned reasoning', () => {
     const context = toPiContext({
       provider: 'deepseek',
       model: 'm',
@@ -217,7 +217,6 @@ describe('toPiContext', () => {
     expect(message.role).toBe('assistant')
     expect(message.stopReason).toBe('toolUse')
     expect(message.content).toEqual([
-      { type: 'thinking', thinking: 'hmm' },
       { type: 'text', text: 'calling' },
       { type: 'toolCall', id: 'c1', name: 'f', arguments: { a: 1 } },
     ])
@@ -452,6 +451,100 @@ describe('toPiContext', () => {
     expect(context.messages[0]).not.toHaveProperty('responseId')
   })
 
+  it('strips OpenAI Responses reasoning summaries from stored and restored signatures', () => {
+    const reasoningItem = {
+      type: 'reasoning',
+      id: 'rs_abc',
+      encrypted_content: 'enc-blob',
+      summary: [{ type: 'summary_text', text: 'private chain of thought' }],
+      status: 'completed',
+    }
+    const state = toPiReplayState(assistant({
+      api: 'openai-responses',
+      provider: 'openai',
+      model: 'gpt-5.5',
+      content: [{ type: 'thinking', thinking: 'private chain of thought', thinkingSignature: JSON.stringify(reasoningItem) }],
+    }))
+    expect(state.blocks[0]).toEqual({
+      type: 'reasoning',
+      thinkingSignature: JSON.stringify({ type: 'reasoning', id: 'rs_abc', encrypted_content: 'enc-blob' }),
+    })
+
+    const storedWithSummary = {
+      ...state,
+      blocks: [{ type: 'reasoning', thinkingSignature: JSON.stringify(reasoningItem) }],
+    }
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'private chain of thought' }],
+        source: {
+          kind: 'model',
+          ...{ provider: 'openai', model: 'gpt-5.5', replayState: storedWithSummary },
+        },
+      })],
+    })
+    expect((context.messages[0] as AssistantMessage).content[0]).toEqual({
+      type: 'thinking',
+      thinking: 'private chain of thought',
+      thinkingSignature: JSON.stringify({ type: 'reasoning', id: 'rs_abc', encrypted_content: 'enc-blob' }),
+    })
+  })
+
+  it.each([
+    ['completions field name', 'reasoning_content'],
+    ['json string', JSON.stringify('reasoning_content')],
+    ['json array', JSON.stringify([{ type: 'reasoning' }])],
+    ['json null', 'null'],
+    ['unrelated object', JSON.stringify({ type: 'text', text: 'hi' })],
+  ])('leaves a %s thinking signature unchanged', (_label, signature) => {
+    const state = toPiReplayState(assistant({
+      content: [{ type: 'thinking', thinking: 'private reasoning', thinkingSignature: signature }],
+    }))
+    expect(state.blocks[0]).toEqual({ type: 'reasoning', thinkingSignature: signature })
+  })
+
+  it('keeps a reasoning item that has no id or encrypted content', () => {
+    const emptyFields = toPiReplayState(assistant({
+      content: [{
+        type: 'thinking',
+        thinking: 'x',
+        thinkingSignature: JSON.stringify({ type: 'reasoning', id: '', encrypted_content: '', summary: ['drop'] }),
+      }],
+    }))
+    expect(emptyFields.blocks[0]).toEqual({
+      type: 'reasoning',
+      thinkingSignature: JSON.stringify({ type: 'reasoning' }),
+    })
+    const missingFields = toPiReplayState(assistant({
+      content: [{
+        type: 'thinking',
+        thinking: 'x',
+        thinkingSignature: JSON.stringify({ type: 'reasoning', summary: ['drop'] }),
+      }],
+    }))
+    expect(missingFields.blocks[0]).toEqual({
+      type: 'reasoning',
+      thinkingSignature: JSON.stringify({ type: 'reasoning' }),
+    })
+  })
+
+  it('treats encrypted_content without a type as a reasoning item', () => {
+    const state = toPiReplayState(assistant({
+      content: [{
+        type: 'thinking',
+        thinking: 'x',
+        thinkingSignature: JSON.stringify({ encrypted_content: 'blob', summary: 'drop' }),
+      }],
+    }))
+    expect(state.blocks[0]).toEqual({
+      type: 'reasoning',
+      thinkingSignature: JSON.stringify({ type: 'reasoning', encrypted_content: 'blob' }),
+    })
+  })
+
   it('degrades unsupported replay-state versions to provider-neutral history', () => {
     const onDegrade = vi.fn()
     const context = toPiContext({
@@ -528,7 +621,7 @@ describe('toPiContext', () => {
     expect(context.messages[0]).toMatchObject({
       role: 'assistant',
       api: 'dsh-foreign',
-      content: [{ type: 'thinking', thinking: 'done' }],
+      content: [],
     })
     expect(onDegrade).toHaveBeenCalledWith(expect.stringContaining('block 0 does not match assistant content'))
   })
@@ -823,6 +916,14 @@ describe('mapStopReason / mapUsage', () => {
     expect(mapStopReason(assistant({
       stopReason: 'error',
       errorMessage: 'HTTP 400: invalid input: temperature exceeds maximum allowed value',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
+    expect(mapStopReason(assistant({
+      stopReason: 'error',
+      errorMessage: 'invalid_prompt',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
+    expect(mapStopReason(assistant({
+      stopReason: 'error',
+      errorMessage: 'Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt: https://platform.openai.com/docs/guides/reasoning#advice-on-prompting',
     }))).toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'HTTP 413: Payload Too Large' })))
       .toMatchObject({ kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE } })
