@@ -1214,6 +1214,91 @@ describe('built-in conversation node Definitions', () => {
     expect(tail.branchUnavailable).toBe(true)
   })
 
+  it('collects valid Tool-result images before the closing Assistant without duplicates', () => {
+    const first = {
+      attachmentId: `sha256:${'a'.repeat(64)}`,
+      mediaType: 'image/png',
+      bytes: 68,
+      width: 640,
+      height: 320,
+      name: 'result.png',
+    }
+    const late = { ...first, attachmentId: `sha256:${'b'.repeat(64)}`, name: 'late.png' }
+    const resultWith = (callId: string, content: readonly unknown[]) => ({
+      ...toolResult(callId, ''),
+      content: [{ type: 'tool-result', toolCallId: callId, content, isError: false }],
+    })
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'tool/call', { turn: 1, step: 1, callId: 'images', name: 'weknora_search', arguments: '{}' }),
+      at(4, 'tool/result', {
+        turn: 1,
+        step: 1,
+        message: resultWith('images', [
+          { type: 'image', attachment: first },
+          { type: 'image', attachment: first },
+          { type: 'image', attachment: { ...first, width: 0 } },
+          { type: 'text', text: 'ignored' },
+        ]),
+      }, { surfaceOp: 'append' }),
+      at(5, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        message: assistantMessage('closing', 'done'),
+      }, { surfaceOp: 'append' }),
+      at(6, 'tool/call', { turn: 1, step: 1, callId: 'late', name: 'weknora_search', arguments: '{}' }),
+      at(7, 'tool/result', {
+        turn: 1,
+        step: 1,
+        message: resultWith('late', [{ type: 'image', attachment: late }]),
+      }, { surfaceOp: 'append' }),
+      at(8, 'step/end', { turn: 1, step: 1 }),
+      at(9, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])
+
+    const tail = node(snapshot(value), 'turn-tail')?.data as TurnTailChatData
+    expect(tail.resultImages).toEqual([first])
+  })
+
+  it('does not promote images returned by unrelated tools into the final answer', () => {
+    const image = {
+      attachmentId: `sha256:${'c'.repeat(64)}`,
+      mediaType: 'image/png',
+      bytes: 68,
+      width: 640,
+      height: 320,
+    }
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'tool/call', { turn: 1, step: 1, callId: 'inspect', name: 'read_image', arguments: '{}' }),
+      at(4, 'tool/result', {
+        turn: 1,
+        step: 1,
+        message: {
+          ...toolResult('inspect', ''),
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'inspect',
+            content: [{ type: 'image', attachment: image }],
+            isError: false,
+          }],
+        },
+      }, { surfaceOp: 'append' }),
+      at(5, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        message: assistantMessage('closing', 'done'),
+      }, { surfaceOp: 'append' }),
+      at(6, 'step/end', { turn: 1, step: 1 }),
+      at(7, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])
+
+    const tail = node(snapshot(value), 'turn-tail')?.data as TurnTailChatData
+    expect(tail.resultImages).toEqual([])
+  })
+
   it('publishes exact Turn usage only after pagination supplies the full lifecycle window', () => {
     const value = assembler([
       at(3, 'assistant/message', {

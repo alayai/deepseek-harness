@@ -265,6 +265,13 @@
   background: var(--dsw-alias-border-l2);
 }
 
+.ioOutputStack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .ioText {
   min-width: 0;
   white-space: pre-wrap;

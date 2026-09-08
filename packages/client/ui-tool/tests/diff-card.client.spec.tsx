@@ -169,6 +169,7 @@ describe('diffCardModel', () => {
 describe('chat row diff body', () => {
   const ownerProps = (block: RunningToolCall | ToolResultNode): GenericToolCardProps => ({
     loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+    renderImages: vi.fn(() => null) as never,
     callId: 'c1', toolName: 'edit', block, openFile: vi.fn(), t,
   })
 

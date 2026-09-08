@@ -5,7 +5,7 @@ import {
   diffTotals,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRenderSlots, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { MessageImageLoader, MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { CHAT_DIFF_MAX_LINES, type DiffCardModel } from '../models/diff-card-model.ts'
 import { CHAT_READ_MAX_LINES, type ReadCardModel } from '../models/read-card-model.ts'
 import type { ImageCardModel } from '../models/image-card-model.ts'
@@ -44,6 +44,8 @@ export interface ToolRowProps {
   bodyRaw?: string | null | undefined
   /** Flattened result text for the expanded Output section; null/absent = no output section. */
   output?: string | null | undefined
+  /** Image blocks carried by generic tool results; rendered under the Output text. */
+  outputImages?: readonly MessageImageSource[] | null | undefined
   /** Ask-user transcript card; card fields are mutually exclusive and replace text sections. */
   askQuestion?: AskQuestionCardModel | null | undefined
   /** Error first line shown as the collapsed summary on an error row; null/absent = keep `summary`. */
@@ -115,6 +117,7 @@ export function ToolRow({
   summarySuffix,
   bodyRaw,
   output,
+  outputImages,
   askQuestion,
   errorSummary,
   terminal,
@@ -148,8 +151,10 @@ export function ToolRow({
   const webBody = web ?? null
   const askQuestionBody = askQuestion ?? null
   const outputText = output ?? null
+  const outputImageList = outputImages ?? []
+  const genericImageBody = outputImageList.length > 0 && renderSlot !== undefined && loadImage !== undefined
   const card = askQuestionBody ?? terminalBody ?? diffBody ?? readBody ?? imageBody ?? searchBody ?? webBody
-  const expandable = bodyRaw != null || outputText !== null || card !== null
+  const expandable = bodyRaw != null || outputText !== null || genericImageBody || card !== null
   const open = expanded && expandable
   const bodyText = useMemo(
     () => open && card === null && bodyRaw != null ? formatToolBody(variant, bodyRaw) : null,
@@ -289,7 +294,7 @@ export function ToolRow({
                                 <CodeBlock code={bodyText} lang="typescript" copyLabel={t('copy')} copiedLabel={t('copied')} className={css.codeBody} />
                               </div>
                             )}
-                            {(cardBody !== null || outputText !== null) && (
+                            {(cardBody !== null || outputText !== null || genericImageBody) && (
                               <div className={css.ioCard}>
                                 {cardBody !== null && (
                                   <div className={css.ioSection}>
@@ -297,15 +302,24 @@ export function ToolRow({
                                     <span className={css.ioText}>{cardBody}</span>
                                   </div>
                                 )}
-                                {cardBody !== null && outputText !== null && (
+                                {cardBody !== null && (outputText !== null || genericImageBody) && (
                                   <span className={css.ioDivider} aria-hidden />
                                 )}
-                                {outputText !== null && (
+                                {(outputText !== null || genericImageBody) && (
                                   <div className={css.ioSection}>
                                     <span className={css.ioLabel}>{t('row.output')}</span>
-                                    <span className={css.ioText} data-error={state === 'error' || undefined}>
-                                      {outputText}
-                                    </span>
+                                    <div className={css.ioOutputStack}>
+                                      {outputText !== null && (
+                                        <span className={css.ioText} data-error={state === 'error' || undefined}>
+                                          {outputText}
+                                        </span>
+                                      )}
+                                      {genericImageBody && renderSlot !== undefined && loadImage !== undefined && renderSlot('tool.call.images', {
+                                        images: outputImageList,
+                                        loadImage,
+                                        align: 'start',
+                                      })}
+                                    </div>
                                   </div>
                                 )}
                               </div>

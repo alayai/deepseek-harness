@@ -60,6 +60,7 @@ describe('Tool presentation tails', () => {
     }
     const props: GenericToolCardProps = {
       loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+      renderImages: vi.fn(() => null) as never,
       callId: 'c5', toolName: 'todo_write', block: settled, openFile: vi.fn(), t,
     }
     const view = render(<GenericToolCard {...props} />)

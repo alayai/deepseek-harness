@@ -10,6 +10,7 @@
 // that produces the values).
 import type { ToolCallBlock, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { LocaleKeysOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { AttachmentId, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 
 export type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-chat/client'
@@ -100,16 +101,86 @@ export interface ToolRowModel {
   filePath: string | undefined
   /** Original argument JSON retained for expansion-time body formatting. */
   bodyRaw: string | null
-  /** Flattened result text ({@link resultText}); null while running or when the result carries no text. */
+  /** Flattened non-image result text ({@link resultText}); null while running or when the result carries no text. */
   output: string | null
+  /** Durable image references carried by generic settled results, in result order. */
+  images: readonly { readonly attachment: ImageAttachmentRef }[]
   /** First line of the result text on an error row; null for every other state. */
   errorSummary: string | null
   state: ToolRowState
 }
 
+const IMAGE_MEDIA_TYPES: ReadonlySet<ImageMediaType> = new Set([
+  'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+])
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}
+
+function isImageMediaType(value: string): value is ImageMediaType {
+  return IMAGE_MEDIA_TYPES.has(value as ImageMediaType)
+}
+
+/**
+ * Narrow one generic image content block to the durable reference arm accepted by
+ * the existing Tool image-gallery slot. Malformed image blocks are not silently
+ * hidden: they fall back to the JSON text path so replayed/foreign content stays
+ * diagnosable.
+ * @param block - an untrusted settled content block.
+ * @returns the gallery source, or null when this block is not a valid image.
+ */
+function imageSource(block: unknown): { readonly attachment: ImageAttachmentRef } | null {
+  if (typeof block !== 'object' || block === null) return null
+  const { type, attachment } = block as { type?: unknown; attachment?: unknown }
+  if (type !== 'image') return null
+  if (typeof attachment !== 'object' || attachment === null || Array.isArray(attachment)) return null
+  const {
+    attachmentId, mediaType, bytes, width, height, name, originalDimensions,
+  } = attachment as Record<string, unknown>
+  if (typeof attachmentId !== 'string' || attachmentId === '') return null
+  if (typeof mediaType !== 'string' || !isImageMediaType(mediaType)) return null
+  if (!positiveInteger(bytes) || !positiveInteger(width) || !positiveInteger(height)) return null
+  if (name !== undefined && typeof name !== 'string') return null
+  let inputDimensions: ImageAttachmentRef['originalDimensions'] | undefined
+  if (originalDimensions !== undefined) {
+    if (typeof originalDimensions !== 'object' || originalDimensions === null || Array.isArray(originalDimensions)) return null
+    const { width: inputWidth, height: inputHeight } = originalDimensions as Record<string, unknown>
+    if (!positiveInteger(inputWidth) || !positiveInteger(inputHeight)) return null
+    inputDimensions = { width: inputWidth, height: inputHeight }
+  }
+  return {
+    attachment: {
+      attachmentId: attachmentId as AttachmentId,
+      mediaType,
+      bytes,
+      width,
+      height,
+      ...name === undefined ? {} : { name },
+      ...inputDimensions === undefined ? {} : { originalDimensions: inputDimensions },
+    },
+  }
+}
+
+/**
+ * Extract durable image references from a settled result's content, preserving
+ * order. This is intentionally generic — any tool can return an image block,
+ * not only the built-in read_image tool.
+ * @param node - the settled result node.
+ * @returns valid image sources in content order.
+ */
+export function resultImages(node: ToolResultNode): readonly { readonly attachment: ImageAttachmentRef }[] {
+  const images: { readonly attachment: ImageAttachmentRef }[] = []
+  for (const block of node.content) {
+    const image = imageSource(block)
+    if (image !== null) images.push(image)
+  }
+  return images
+}
+
 /**
  * Flatten a settled result's content blocks to display text: text blocks
- * verbatim, other block shapes as pretty JSON. Empty content on a failed call
+ * verbatim, non-image block shapes as pretty JSON. Empty content on a failed call
  * falls back to the structured error's `name: code` line.
  * @param node - the settled result node.
  * @returns the flattened result text (may be empty).
@@ -118,7 +189,7 @@ export function resultText(node: ToolResultNode): string {
   const parts: string[] = []
   for (const block of node.content) {
     if (block.type === 'text') parts.push(block.text)
-    else parts.push(JSON.stringify(block, null, 2))
+    else if (imageSource(block) === null) parts.push(JSON.stringify(block, null, 2))
   }
   if (parts.length === 0 && node.error !== undefined) {
     parts.push(`${node.error.name}: ${node.error.code}`)
@@ -249,6 +320,7 @@ export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: strin
   // call with blank content has nothing to expand, and a blank first line
   // would erase the collapsed error row's summary slot.
   const output = done ? (resultText(block) || null) : null
+  const images = done ? resultImages(block) : []
   const errorSummary = state === 'error' && output !== null ? firstLine(output) : null
   const bodyRaw = argsRaw === '' ? null : argsRaw
   return {
@@ -258,6 +330,7 @@ export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: strin
     filePath: deriveFilePath(variant, argsRaw),
     bodyRaw,
     output,
+    images,
     errorSummary,
     state,
   }

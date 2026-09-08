@@ -152,6 +152,7 @@ describe('readCardModel', () => {
 describe('GenericToolCard read body', () => {
   const ownerProps = (block: RunningToolCall | ToolResultNode): GenericToolCardProps => ({
     loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+    renderImages: vi.fn(() => null) as never,
     callId: 'c1', toolName: 'read', block, openFile: vi.fn(), t,
   })
 

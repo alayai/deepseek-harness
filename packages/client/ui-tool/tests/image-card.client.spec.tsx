@@ -3,8 +3,8 @@
 // a settled call's persisted metadata and raw envelope, and the chat tool row that
 // consumes it — the keyed ReadImageRow composing ToolRow with the image card as its
 // collapsed-by-default expanded body. Also pins the keyed 'read_image' toolview
-// registration (including its `tool.call.images` child-slot declaration) and the
-// text that stays readable when the attachment slot renders nothing.
+// registration and the text that stays readable when the attachment slot renders
+// nothing.
 //
 // The image card differs from every other card in one load-bearing way: its bytes
 // are a session-authorized attachment, so the row cannot draw them itself. It
@@ -278,7 +278,7 @@ describe('ReadImageRow keyed toolview', () => {
     renderSlot?: PropsRenderSlots<'tool.call.images'>['renderSlot'],
     loader: MessageImageLoader = loadImage,
   ): Parameters<typeof ReadImageRow>[0] => ({
-    callId: 'c1', toolName: 'read_image', block, openFile: vi.fn(), renderSlot, loadImage: loader,
+    callId: 'c1', toolName: 'read_image', block, openFile: vi.fn(), renderImages: renderSlot, loadImage: loader,
     sessionId: SID, useSessions: bindSnapshotSelector(list()),
     t,
   } as unknown as Parameters<typeof ReadImageRow>[0])
@@ -363,7 +363,7 @@ describe('ReadImageRow keyed toolview', () => {
     expect(view.container.textContent).toContain('does not declare image input')
   })
 
-  it('registers under the read_image key of the keyed toolview slot, declaring the image slot', () => {
+  it('registers under the read_image key of the keyed toolview slot', () => {
     const registered: { name: unknown; key?: unknown; children?: unknown }[] = []
     const ctx = { slots: {
       inject: (_name: string, callback: () => () => void) => callback(),
@@ -377,7 +377,6 @@ describe('ReadImageRow keyed toolview', () => {
       name: 'tool.call.toolview',
       key: 'read_image',
       locale: 'conversation',
-      children: { 'tool.call.images': { kind: 'single', scope: 'session' } },
     }])
     expect(readImageToolview.inject).toEqual(['slots'])
   })

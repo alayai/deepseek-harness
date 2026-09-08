@@ -1,3 +1,4 @@
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {
   AssistantBlock, AssistantMessageNode, CommandNode, CompactionSummaryNode,
   ConversationLocation, ConversationViewNode, ModelRetryNode, RunningToolCall,
@@ -91,6 +92,8 @@ export interface TurnTailChatData {
   readonly closing: FinalAssistantChatData | null
   /** Whether non-rendered later evidence makes the closing seq non-tail. */
   readonly branchUnavailable: boolean
+  /** Durable images returned by successful Tools before the closing Assistant. */
+  readonly resultImages: readonly ImageAttachmentRef[]
   readonly ttftMs?: number
   readonly tokensPerSecond?: number
   /** Exact per-Turn accounting; absent when the loaded evidence is incomplete. */

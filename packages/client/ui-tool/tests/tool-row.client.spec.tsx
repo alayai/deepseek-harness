@@ -3,13 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 
 import type { RunningToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import {
-  classifyTool, formatToolBody, resultText, toolRowModel,
+  classifyTool, formatToolBody, resultImages, resultText, toolRowModel,
 } from '../src/client/tool/models/tool-call-model.ts'
 import { ToolRow } from '../src/client/tool/components/ToolRow.tsx'
 import { GenericToolCard, type GenericToolCardProps } from '../src/client/tool/toolviews/GenericToolCard.tsx'
+import type { ToolImagesOwnerProps } from '../src/client/contract/slots.ts'
 import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 
 afterEach(() => {
@@ -18,6 +21,29 @@ afterEach(() => {
 })
 
 const t: GenericToolCardProps['t'] = makeTranslate(zh, commonZh)
+
+const sampleImage: ImageAttachmentRef = {
+  attachmentId: 'sha256:tool-image' as ImageAttachmentRef['attachmentId'],
+  mediaType: 'image/png',
+  bytes: 123,
+  width: 64,
+  height: 32,
+  name: 'tool.png',
+}
+
+const stubRenderImages = () => vi.fn((_key: 'tool.call.images', owner: ToolImagesOwnerProps) => (
+  <div data-images>
+    {owner.images.map((image, index) => (
+      'attachment' in image ? (
+        <span key={image.attachment.attachmentId} data-image-id={image.attachment.attachmentId} />
+      ) : (
+        <span key={index} data-preview-url={image.preview.url} />
+      )
+    ))}
+  </div>
+))
+
+const loadImage: MessageImageLoader = vi.fn(() => Promise.reject(new Error('not used')))
 
 const running = (over?: Partial<RunningToolCall>): RunningToolCall => ({
   callId: 'c1', name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}',
@@ -180,8 +206,10 @@ describe('tool-call-model', () => {
       .toBe('{\n  "code": ""\n}')
   })
 
-  it('resultText flattens text blocks verbatim, other shapes as JSON, empty error content to name: code', () => {
+  it('resultText flattens text blocks verbatim, skips valid images, and keeps malformed image blocks diagnosable', () => {
     expect(resultText(result({ content: [{ type: 'text', text: 'a\nb' }] }))).toBe('a\nb')
+    expect(resultText(result({ content: [{ type: 'text', text: 'a' }, { type: 'image', attachment: sampleImage }] })))
+      .toBe('a')
     expect(resultText(result({ content: [{ type: 'text', text: 'a' }, { type: 'image', data: 'x' } as never] })))
       .toBe(`a\n${JSON.stringify({ type: 'image', data: 'x' }, null, 2)}`)
     expect(resultText(result({ content: [], isError: true, error: { name: 'ToolError', code: 'denied' } })))
@@ -193,6 +221,13 @@ describe('tool-call-model', () => {
     expect(toolRowModel('bash', result({ content: [{ type: 'text', text: 'out' }] })).output).toBe('out')
     expect(toolRowModel('bash', running()).output).toBeNull()
     expect(toolRowModel('bash', result({ content: [] })).output).toBeNull()
+  })
+
+  it('extracts valid image blocks into generic row images', () => {
+    const settled = result({ content: [{ type: 'text', text: 'out' }, { type: 'image', attachment: sampleImage }] })
+    expect(resultImages(settled)).toEqual([{ attachment: sampleImage }])
+    expect(toolRowModel('weknora_ask', settled).images).toEqual([{ attachment: sampleImage }])
+    expect(toolRowModel('weknora_ask', running({ name: 'weknora_ask' })).images).toEqual([])
   })
 
   it('derives errorSummary as the first output line on error rows only', () => {
@@ -425,11 +460,36 @@ describe('ToolRow', () => {
     expect(outputOnly.getByText('输出')).toBeTruthy()
     expect(outputOnly.getByText('only out')).toBeTruthy()
   })
+
+  it('renders generic tool-result image blocks through the shared image slot', () => {
+    const renderImages = stubRenderImages()
+    const view = render(
+      <ToolRow
+        {...rowProps}
+        bodyRaw={null}
+        output="answer text"
+        outputImages={[{ attachment: sampleImage }]}
+        renderSlot={renderImages as never}
+        loadImage={loadImage}
+      />,
+    )
+    expect(view.container.querySelector('[data-images]')).toBeNull()
+    fireEvent.click(view.getByRole('button'))
+    expect(view.getByText('输出')).toBeTruthy()
+    expect(view.getByText('answer text')).toBeTruthy()
+    expect(renderImages).toHaveBeenLastCalledWith('tool.call.images', {
+      images: [{ attachment: sampleImage }],
+      loadImage,
+      align: 'start',
+    })
+    expect(view.container.querySelector(`[data-image-id="${sampleImage.attachmentId}"]`)).not.toBeNull()
+  })
 })
 
 describe('GenericToolCard', () => {
   const props = (toolName: string, block: RunningToolCall | ToolResultNode): GenericToolCardProps => ({
     loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+    renderImages: stubRenderImages() as never,
     callId: 'c1', toolName, block, openFile: vi.fn(), t,
   })
 
@@ -493,5 +553,22 @@ describe('GenericToolCard', () => {
     const bashView = render(<GenericToolCard {...bash} />)
     fireEvent.click(bashView.getByText('List files'))
     expect(bash.openFile).not.toHaveBeenCalled()
+  })
+
+  it('shows images returned by an otherwise generic tool such as weknora_ask', () => {
+    const generic = props('weknora_ask', result({
+      call: { name: 'weknora_ask', argsRaw: '{"query":"Auto CAD"}' },
+      content: [{ type: 'text', text: '处理方法' }, { type: 'image', attachment: sampleImage }],
+    }))
+    const view = render(<GenericToolCard {...generic} />)
+    fireEvent.click(view.getByRole('button', { name: /工具调用/ }))
+    expect(view.getByText('处理方法')).toBeTruthy()
+    expect(generic.renderImages).toHaveBeenLastCalledWith('tool.call.images', {
+      images: [{ attachment: sampleImage }],
+      loadImage: generic.loadImage,
+      align: 'start',
+    })
+    expect(view.container.querySelector(`[data-image-id="${sampleImage.attachmentId}"]`)).not.toBeNull()
+    expect(view.container.textContent).not.toContain('"type": "image"')
   })
 })

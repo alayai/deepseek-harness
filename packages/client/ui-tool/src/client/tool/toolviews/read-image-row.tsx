@@ -24,23 +24,22 @@ import { CONVERSATION_NS as NS } from '../../locale.ts'
 
 /**
  * read_image row: the read-family chrome with the durably committed image as the
- * row's collapsed-by-default card body, rendered through the `tool.call.images`
- * slot this entry declares.
+ * row's collapsed-by-default card body, rendered through the Tool-owned
+ * `tool.call.images` slot.
  */
 export function ReadImageRow(props: ReadImageRowProps) {
-  const { block, cwd, home, renderSlot, loadImage } = props
+  const { block, cwd, home, renderImages, loadImage } = props
   return readFamilyRow(props, {
     image: imageCardModel(block, cwd, home),
-    renderSlot,
+    renderSlot: renderImages,
     loadImage,
   })
 }
 
 /**
  * The read_image row as a plain registrant plugin following the atomic Tool-view
- * declaration across independent activation and reload lifetimes. Declaring
- * `tool.call.images` as a child slot authorizes this entry's `renderSlot` to
- * dispatch the gallery.
+ * declaration across independent activation and reload lifetimes. The shared
+ * ToolCallTree owner supplies `renderImages` for the Tool-owned gallery slot.
  */
 export const readImageToolview = {
   name: 'read-image-toolview',
@@ -55,7 +54,6 @@ export const readImageToolview = {
         name: 'tool.call.toolview',
         key: 'read_image',
         locale: NS,
-        children: { 'tool.call.images': { kind: 'single', scope: 'session' } },
       }, ReadImageRow))
   },
 }

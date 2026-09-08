@@ -7,6 +7,7 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { RenderMessageImages } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { appendResultImages } from '../src/client/chat/AssistantNodeView.tsx'
 import { zh } from '../src/client/locale.ts'
 
 afterEach(cleanup)
@@ -40,6 +41,21 @@ function imageRenderer(calls: MessageImagesRenderOwner[]): RenderMessageImages {
 }
 
 describe('assistant image slot handoff', () => {
+  it('appends unique Tool-result images after native Assistant content', () => {
+    const second = {
+      ...attachment,
+      attachmentId: AttachmentId(`sha256:${'b'.repeat(64)}`),
+      name: 'tool-result.png',
+    }
+    const native = [{ kind: 'text' as const, text: 'answer' }, { kind: 'image' as const, attachment }]
+
+    expect(appendResultImages(native, [attachment, second, second])).toEqual([
+      ...native,
+      { kind: 'image', attachment: second },
+    ])
+    expect(appendResultImages(native, [])).toBe(native)
+  })
+
   it('passes one image group and its message alignment to the renderer', () => {
     const calls: MessageImagesRenderOwner[] = []
     const view = render(

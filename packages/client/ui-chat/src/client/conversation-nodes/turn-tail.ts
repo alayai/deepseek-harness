@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, TurnLocation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -35,6 +36,56 @@ interface TurnTailState {
 interface StepEvidence {
   readonly streamedText: boolean
   readonly finalized: boolean
+}
+
+function validResultImage(block: unknown): ImageAttachmentRef | null {
+  if (typeof block !== 'object' || block === null || Array.isArray(block)) return null
+  const { type, attachment } = block as { type?: unknown; attachment?: unknown }
+  if (type !== 'image' || typeof attachment !== 'object' || attachment === null || Array.isArray(attachment)) {
+    return null
+  }
+  const image = attachment as Record<string, unknown>
+  if (typeof image.attachmentId !== 'string' || image.attachmentId === '') return null
+  if (image.mediaType !== 'image/png' && image.mediaType !== 'image/jpeg'
+    && image.mediaType !== 'image/webp' && image.mediaType !== 'image/gif') return null
+  if (typeof image.bytes !== 'number' || !Number.isInteger(image.bytes) || image.bytes <= 0) return null
+  if (typeof image.width !== 'number' || !Number.isInteger(image.width) || image.width <= 0) return null
+  if (typeof image.height !== 'number' || !Number.isInteger(image.height) || image.height <= 0) return null
+  if (image.name !== undefined && typeof image.name !== 'string') return null
+  return attachment as ImageAttachmentRef
+}
+
+const FINAL_ANSWER_IMAGE_TOOLS = new Set([
+  'weknora_search', 'weknora_read_document', 'weknora_ask',
+])
+
+function resultImages(
+  context: ConversationNodeContext<TurnTailState>,
+  closingSeq: number | undefined,
+): readonly ImageAttachmentRef[] {
+  if (closingSeq === undefined) return []
+  const images: ImageAttachmentRef[] = []
+  const seen = new Set<string>()
+  const calls = new Map<string, string>()
+  for (const match of context.matches) {
+    if (match.event.seq > closingSeq) continue
+    if (match.event.type === 'tool/call') {
+      calls.set(String(match.event.data.callId), match.event.data.name)
+      continue
+    }
+    if (match.event.type !== 'tool/result' || !isAppendSurfaceEvent(match.event)) continue
+    const callId = String(match.event.data.message.source.callId)
+    if (!FINAL_ANSWER_IMAGE_TOOLS.has(calls.get(callId) ?? '')) continue
+    const result = match.event.data.message.content[0]
+    if (result.isError === true) continue
+    for (const block of result.content) {
+      const image = validResultImage(block)
+      if (image === null || seen.has(image.attachmentId)) continue
+      seen.add(image.attachmentId)
+      images.push(image)
+    }
+  }
+  return images
 }
 
 function isSessionEvent(event: ConversationMatch['event']): event is SessionEvent {
@@ -170,6 +221,7 @@ function tailData(context: ConversationNodeContext<TurnTailState>): TurnTailChat
     time: end.event.time,
     closing,
     branchUnavailable: closing === null || latestTranscriptSeq !== closing.finalNode.seq,
+    resultImages: resultImages(context, closing?.finalNode.seq),
     ...metrics?.ttftMs === undefined ? {} : { ttftMs: metrics.ttftMs },
     ...metrics?.tokensPerSecond === undefined ? {} : { tokensPerSecond: metrics.tokensPerSecond },
     ...tokenUsage === undefined ? {} : { tokenUsage },

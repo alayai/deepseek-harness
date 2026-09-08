@@ -27,15 +27,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /**
      * Durable images of a settled image-bearing Tool call, rendered through
      * the attachment presentation plugin. The Tool layer never imports an
-     * attachment implementation: a toolview declares this slot as a child and
-     * renders it with the image card's references plus the session-authorized
-     * loader it received in its owner, and the attachment plugin fills the
-     * gallery. Composing no attachment presentation plugin renders nothing,
-     * which is why the image card keeps its own envelope text beside the
-     * gallery. A child slot is declared by exactly one entry: registering a
-     * second toolview that declares the same child throws at load, so a
-     * future image-bearing tool must reuse this entry or own a distinct
-     * slot.
+     * attachment implementation: ToolCallTree declares this slot once and
+     * passes its renderer to every keyed or generic tool row, which renders it
+     * with image references plus the session-authorized loader it received in
+     * its owner; the attachment plugin fills the gallery. Composing no
+     * attachment presentation plugin renders nothing, which is why image rows
+     * keep their own envelope text beside the gallery.
      */
     'tool.call.images': { kind: 'single'; scope: 'session'; owner: ToolImagesOwnerProps }
   }
@@ -73,6 +70,8 @@ export interface ToolCallOwnerProps {
    * authorization.
    */
   loadImage: MessageImageLoader
+  /** Render the shared Tool image-gallery child slot for any image-bearing call. */
+  renderImages: PropsRenderSlots<'tool.call.images'>['renderSlot']
   /** Inspect this call in the trajectory view when available. */
   inspect?: (() => void) | undefined
 }
@@ -95,7 +94,7 @@ export type ToolHostInfoInjected = {
 
 /** Full props of the Tool call-tree renderer registered as a `tool-call` Chat Node. */
 export type ToolTreeProps = PropsRuntime<'conversation.chat.node', 'tool-call'>
-  & PropsRenderSlots<'tool.call.toolview'>
+  & PropsRenderSlots<'tool.call.toolview' | 'tool.call.images'>
   & PropsLocale<'conversation'>
   & InjectFace<ToolHostInfoInjected>
 
