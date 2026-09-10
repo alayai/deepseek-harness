@@ -177,7 +177,8 @@ describe('GenericToolCard read body', () => {
     const view = render(<GenericToolCard {...({
       callId: 'c1', toolName: 'echo', block: settled({
         call: { name: 'echo', argsRaw: '{"text":"x"}' }, meta: undefined,
-      }), openFile: vi.fn(), loadImage: vi.fn(() => Promise.reject(new Error('not used'))), t,
+      }), openFile: vi.fn(), loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+      renderImages: vi.fn(() => null) as never, t,
     })} />)
     toggleRow(view)
     expect(view.container.querySelector('[data-read]')).toBeNull()

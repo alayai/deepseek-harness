@@ -195,7 +195,8 @@ describe('chat row diff body', () => {
     // args body is the fallback the diff card must not have replaced.
     const view = render(<GenericToolCard {...{
       callId: 'c1', toolName: 'some_tool', openFile: vi.fn(),
-      loadImage: vi.fn(() => Promise.reject(new Error('not used'))), t,
+      loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
+      renderImages: vi.fn(() => null) as never, t,
       block: settled({
         call: { name: 'some_tool', argsRaw: '{"foo":"bar"}' },
         meta: undefined,
