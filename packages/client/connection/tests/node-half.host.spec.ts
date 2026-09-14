@@ -327,6 +327,38 @@ describe('connection node half', () => {
     expect(routes).toHaveLength(0)
   })
 
+  it('registers a dedicated RPC channel from a caller that injects only connection', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    provideBrowserCredentials(ctx)
+    ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    const nested = ctx.plugin({
+      inject: ['connection'],
+      apply: (pluginCtx: Context) => {
+        pluginCtx.connection.rpc.handle('/rpc', async () => ({ ok: true, value: null }))
+      },
+    })
+    await nested.await()
+    expect(routes.some(route => route.path === '/rpc')).toBe(true)
+    await nested.dispose()
+    expect(routes.map(candidate => candidate.path)).toEqual([API_PATH])
+    await fiber.dispose()
+  })
+
+  it('refuses a dedicated RPC channel when webServer is absent', async () => {
+    const ctx = new Context()
+    provideBrowserCredentials(ctx)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const connection = ctx.get('connection') as HostConnectionHandle
+    expect(() => connection.rpc.handle('/rpc', async () => ({ ok: true, value: null })))
+      .toThrow(/require an active webServer/)
+    await fiber.dispose()
+  })
+
   it('dispatches claimed /api endpoints and withdraws the claim', async () => {
     const ctx = new Context()
     const routes: WebRoute[] = []
