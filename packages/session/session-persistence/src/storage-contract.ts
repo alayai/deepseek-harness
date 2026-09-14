@@ -39,11 +39,14 @@ export function assertStoredId(id: SessionId, meta: SessionHeader): void {
 }
 
 /**
- * Refuse a stored header whose format version this build does not read.
+ * Refuse a header that has not been restored to the current logical format.
  * @param meta - the stored header.
  * @param location - the backend's artifact location for the refusal, when one exists.
  */
-export function assertVersion(meta: SessionHeader, location?: SessionLocation): void {
+export function assertVersion(
+  meta: { readonly id: SessionId; readonly version: number },
+  location?: SessionLocation,
+): void {
   if (meta.version !== SESSION_FORMAT_VERSION) {
     throw unsupported(sessionFormatVersionRefusal(meta.id, meta.version), location)
   }
@@ -56,8 +59,8 @@ export function assertVersion(meta: SessionHeader, location?: SessionLocation): 
  * skipping an unknown required event could reconstruct a wrong session (the
  * envelope contract on `SessionEvent.ignorable`). Known types are the
  * generated repository catalog plus `SessionEventMap` keys harvested from
- * currently mounted out-of-repo plugins. Both newer vocabularies and
- * retired pre-release shapes refuse here; this build ships no migration.
+ * currently mounted out-of-repo plugins. Unknown required types and
+ * retired pre-release shapes refuse here; this validator performs no migration.
  * @param meta - the stored header the events belong to.
  * @param events - exclusively owned decoded events; validated in place.
  * @param location - the backend's artifact location for refusals, when one exists.
