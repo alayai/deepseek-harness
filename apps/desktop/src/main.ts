@@ -324,6 +324,19 @@ async function main(): Promise<void> {
     if (typeof spec !== 'string') throw new Error('dsh desktop: plugin spec must be a string')
     return mutate(event, { type: 'plugin-add', spec })
   })
+  ipcMain.handle(DESKTOP_IPC.pluginsPickTarball, async (event) => {
+    assertDesktopSender(event, ['shell'])
+    const parent = pluginWindow !== undefined && !pluginWindow.isDestroyed() ? pluginWindow : undefined
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: messages.npmPackage, extensions: ['tgz'] }],
+    }
+    const result = parent === undefined
+      ? await dialog.showOpenDialog(options)
+      : await dialog.showOpenDialog(parent, options)
+    const selected = result.canceled ? undefined : result.filePaths[0]
+    return selected === '' ? undefined : selected
+  })
   ipcMain.handle(DESKTOP_IPC.pluginsRemove, (event, name: unknown) => {
     if (typeof name !== 'string') throw new Error('dsh desktop: plugin name must be a string')
     return mutate(event, { type: 'plugin-remove', name })
@@ -493,9 +506,7 @@ async function main(): Promise<void> {
   mainWindow = createMainWindow()
   await reconcileBackend().catch(() => undefined)
   // Window lifecycle callbacks run while backend startup is pending.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (quitting) return
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (mainWindow !== undefined && development !== undefined && process.env.DSH_DESKTOP_OPEN_DEVTOOLS !== '0') {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   }

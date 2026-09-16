@@ -67,7 +67,10 @@ const collect = (value: string, previous: string[] = []): string[] => [...previo
 
 function rejectElectronProfile(program: Command, profile: string): void {
   if (profile.toLowerCase() === 'desktop') {
-    program.error('error: profile "desktop" is managed exclusively by the Electron application')
+    program.error(
+      'error: profile "desktop" is managed exclusively by the Electron application; '
+      + 'install plugins from the Desktop plugin manager, or use a CLI profile such as web',
+    )
   }
 }
 

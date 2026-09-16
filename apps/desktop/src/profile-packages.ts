@@ -5,6 +5,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathS
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { satisfies } from 'semver'
+import { removeOwnedDirectory } from './owned-directory.ts'
 import { desktopRuntimeId, runtimePath, type DesktopRuntimeDescriptor } from './runtime-tree.ts'
 
 /** Applied runtime identity and the only links Desktop may replace. */
@@ -44,6 +45,43 @@ function stat(path: string): ReturnType<typeof lstatSync> | undefined {
 function inside(root: string, path: string): boolean {
   const child = relative(root, path)
   return child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`))
+}
+
+function realpathOrUndefined(path: string): string | undefined {
+  try { return realpathSync.native(path) } catch { return undefined }
+}
+
+function isHostLink(path: string, hostTarget: string, entry: NonNullable<ReturnType<typeof stat>>): boolean {
+  if (!entry.isSymbolicLink()) return false
+  if (resolve(dirname(path), readlinkSync(path)) === resolve(hostTarget)) return true
+  const real = realpathOrUndefined(path)
+  return real !== undefined && real === (realpathOrUndefined(hostTarget) ?? resolve(hostTarget))
+}
+
+function isInsideProfile(profile: string, path: string): boolean {
+  const root = realpathOrUndefined(profile) ?? resolve(profile)
+  const real = realpathOrUndefined(path)
+  return real !== undefined && inside(root, real)
+}
+
+function versionMatches(version: string, range: string): boolean {
+  return satisfies(version, range, { includePrerelease: true })
+}
+
+function clearManagedPackage(profile: string, path: string, name: string, hostTarget?: string): void {
+  const entry = stat(path)
+  if (entry === undefined) return
+  if (hostTarget !== undefined && isHostLink(path, hostTarget, entry)) {
+    unlinkSync(path)
+    return
+  }
+  if (isInsideProfile(profile, path)) {
+    removeOwnedDirectory(path)
+    return
+  }
+  throw new Error(hostTarget === undefined
+    ? `desktop profile: plugin installed reserved host package ${name}`
+    : `desktop profile: refusing to replace unowned package ${name}`)
 }
 
 /**
@@ -89,13 +127,7 @@ export function desktopPluginLockHash(profile: string): string {
  */
 export function unlinkDesktopHostPackages(profile: string): void {
   for (const link of readDesktopProfileState(profile)?.links ?? []) {
-    const path = join(profile, 'node_modules', link.name)
-    const entry = stat(path)
-    if (entry === undefined) continue
-    if (!entry.isSymbolicLink() || resolve(dirname(path), readlinkSync(path)) !== resolve(link.target)) {
-      throw new Error(`desktop profile: refusing to replace unowned package ${link.name}`)
-    }
-    unlinkSync(path)
+    clearManagedPackage(profile, join(profile, 'node_modules', link.name), link.name, link.target)
   }
 }
 
@@ -110,7 +142,7 @@ export function linkDesktopHostPackages(profile: string, root: string, runtime: 
   const links = runtime.sharedPackages.map(entry => ({ name: entry.name, target: runtimePath(root, entry.path) }))
   for (const link of links) {
     const path = join(profile, 'node_modules', link.name)
-    if (stat(path) !== undefined) throw new Error(`desktop profile: plugin installed reserved host package ${link.name}`)
+    clearManagedPackage(profile, path, link.name)
     mkdirSync(dirname(path), { recursive: true })
     symlinkSync(link.target, path, process.platform === 'win32' ? 'junction' : 'dir')
   }
@@ -216,15 +248,15 @@ export function validateDesktopPluginGraph(
       const peer = name in info.peerDependencies
       const optional = peer ? info.optionalPeers.has(name) : name in info.optionalDependencies
       const target = packageFrom(path, name)
+      const host = shared.get(name)
+      if (peer && host === undefined && (target === undefined || !inside(profileRoot, target))) continue
       if (target === undefined && optional) continue
       if (target === undefined) throw new Error(`desktop profile: ${chain} requires missing ${name}@${range}`)
-      const host = shared.get(name)
-      if (host !== undefined && name in deps) throw new Error(`desktop profile: ${chain} must declare ${name} as a peer dependency`)
       if (host !== undefined ? target !== host : !inside(profileRoot, target)) {
         throw new Error(`desktop profile: ${chain} resolves ${name} outside its owned packages`)
       }
       const dependency = manifest(target)
-      if (peer && !satisfies(dependency.version, range)) {
+      if ((host !== undefined || peer) && !versionMatches(dependency.version, range)) {
         throw new Error(`desktop profile: ${chain} requires ${name}@${range}, found ${dependency.version}`)
       }
       if (host === undefined) visit(target, `${chain} -> ${name}`)

@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { c } from 'tar'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resolveDesktopPaths } from '../src/paths.ts'
-import { DesktopProjectManager, packageNameFromSpec, type DesktopProjectHooks } from '../src/project-manager.ts'
+import { DesktopProjectManager, packageNameFromSpec, resolvePluginAddSource, type DesktopProjectHooks } from '../src/project-manager.ts'
 import { runtimeFixture } from './runtime-fixture.ts'
 
 const roots: string[] = []
@@ -30,14 +31,16 @@ if (command !== 'rebuild') {
     const spec = args[args.indexOf(command) + 1]
     const index = spec.lastIndexOf('@')
     const name = index > 0 ? spec.slice(0, index) : spec
-    manifest.dependencies[name] = index > 0 ? spec.slice(index + 1) : '1.0.0'
+    const recorded = index > 0 ? spec.slice(index + 1) : '1.0.0'
+    manifest.dependencies[name] = recorded
   }
   if (command === 'remove') delete manifest.dependencies[args[args.indexOf(command) + 1]]
   writeFileSync(manifestPath, JSON.stringify(manifest))
   rmSync(join(project, 'node_modules'), { recursive: true, force: true })
-  for (const [name, version] of Object.entries(manifest.dependencies)) {
+  for (const [name, spec] of Object.entries(manifest.dependencies)) {
     const packageRoot = join(project, 'node_modules', name)
     mkdirSync(packageRoot, { recursive: true })
+    const version = spec.startsWith('file:') ? '1.0.0' : spec
     writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({name, version,
       peerDependencies: {'@deepseek-ai/cordis': '^1.0.0'}, dsh: {bundle: {patch: './bundle.yml'}}}))
     writeFileSync(join(packageRoot, 'bundle.yml'), '[]\\n')
@@ -160,6 +163,43 @@ describe('desktop external plugin profile', () => {
     for (const spec of ['file:../plugin', '--registry=evil', 'https://example.test/plugin.tgz']) {
       expect(() => packageNameFromSpec(spec)).toThrow(/unsupported npm package spec/u)
     }
+  })
+
+  it('classifies an absolute local tarball without accepting remote or relative archives', async () => {
+    const root = temporaryRoot()
+    const source = join(root, 'tarball-src', 'package')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'local-plugin', version: '1.2.3' }))
+    const tarball = join(root, 'local-plugin-1.2.3.tgz')
+    await c({ file: tarball, cwd: join(source, '..'), gzip: true }, ['package'])
+    expect(resolvePluginAddSource(tarball)).toEqual({ kind: 'tarball', path: tarball })
+    expect(resolvePluginAddSource(`file:${tarball}`)).toEqual({ kind: 'tarball', path: tarball })
+    expect(resolvePluginAddSource('plugin@1.2.3')).toEqual({ kind: 'registry', spec: 'plugin@1.2.3', name: 'plugin' })
+    expect(() => resolvePluginAddSource('file:../plugin.tgz')).toThrow(/unsupported npm package spec/u)
+    expect(() => resolvePluginAddSource('https://example.test/plugin.tgz')).toThrow(/unsupported npm package spec/u)
+    expect(() => resolvePluginAddSource(join(root, 'missing.tgz'))).toThrow(/tarball not found/u)
+  })
+
+  it('vendors a local tarball into the profile and removes it with the plugin', async () => {
+    const { root, manager } = setup()
+    const source = join(root, 'tarball-src', 'package')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'local-plugin', version: '1.2.3' }))
+    const tarball = join(root, 'local-plugin-1.2.3.tgz')
+    await c({ file: tarball, cwd: join(source, '..'), gzip: true }, ['package'])
+    await manager.applyRelease()
+    await manager.mutate({ type: 'plugin-add', spec: tarball }, hooks())
+    const vendored = join(manager.paths.profile, 'desktop-plugins', 'local-plugin-1.2.3.tgz')
+    expect(existsSync(vendored)).toBe(true)
+    expect(manager.listPlugins()).toEqual([{ name: 'local-plugin', version: '1.0.0', enabled: true }])
+    expect(JSON.parse(readFileSync(join(manager.paths.profile, 'package.json'), 'utf8'))).toMatchObject({
+      dependencies: { 'local-plugin': 'file:./desktop-plugins/local-plugin-1.2.3.tgz' },
+    })
+    await expect(manager.mutate({ type: 'plugin-update', name: 'local-plugin', version: '1.2.4' }, hooks()))
+      .rejects.toThrow(/updated by installing a new tarball/u)
+    await manager.mutate({ type: 'plugin-remove', name: 'local-plugin' }, hooks())
+    expect(manager.listPlugins()).toEqual([])
+    expect(existsSync(vendored)).toBe(false)
   })
 
   it('retries installation after an interrupted runtime rebuild removed plugin files', async () => {

@@ -18,6 +18,25 @@ function exitCode(argv: string[]): number {
   }
 }
 
+/** Capture Commander stderr from a rejected invocation. */
+function stderrOf(argv: string[]): string {
+  const chunks: string[] = []
+  vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit') })
+  vi.spyOn(process.stdout, 'write').mockReturnValue(true)
+  vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    chunks.push(typeof chunk === 'string' ? chunk : chunk.toString())
+    return true
+  })
+  try {
+    parse(argv)
+    throw new Error(`expected ${JSON.stringify(argv)} to exit`)
+  } catch {
+    return chunks.join('')
+  } finally {
+    vi.restoreAllMocks()
+  }
+}
+
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('parseDshArgs', () => {
@@ -122,6 +141,10 @@ describe('parseDshArgs', () => {
     expect(exitCode(['--profile', 'desktop', '--dump-config'])).toBe(1)
     expect(exitCode(['plugin', '--profile', 'desktop', 'add', 'x'])).toBe(1)
     expect(exitCode(['plugin', '--profile', 'Desktop', 'add', 'x'])).toBe(1)
+    expect(stderrOf(['plugin', '--profile', 'desktop', 'add', 'x']))
+      .toMatch(/managed exclusively by the Electron application/u)
+    expect(stderrOf(['plugin', '--profile', 'desktop', 'add', 'x']))
+      .toMatch(/CLI profile such as web/u)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
     expect(exitCode(['--from-default-profile', 'web', 'plugin', '--profile', 'x', 'add', 'y'])).toBe(1)
   })

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -59,6 +59,13 @@ it('installs a real pnpm graph, then executes approved scripts with the shared h
     expect(execFileSync(process.execPath, [entry], { encoding: 'utf8' }).trim()).toBe('true')
     await manager.mutate({ type: 'plugin-remove', name: 'fixture-plugin' }, hooks)
     expect(manager.listPlugins()).toEqual([])
+    const tarball = join(root, 'fixture-plugin.tgz')
+    await manager.mutate({ type: 'plugin-add', spec: tarball }, hooks)
+    expect(manager.listPlugins()).toEqual([{ name: 'fixture-plugin', version: '1.0.0', enabled: true }])
+    expect(existsSync(join(manager.paths.profile, 'desktop-plugins', 'fixture-plugin-1.0.0.tgz'))).toBe(true)
+    await manager.mutate({ type: 'plugin-remove', name: 'fixture-plugin' }, hooks)
+    expect(manager.listPlugins()).toEqual([])
+    expect(existsSync(join(manager.paths.profile, 'desktop-plugins', 'fixture-plugin-1.0.0.tgz'))).toBe(false)
   } finally {
     server.closeAllConnections()
     if (server.listening) await new Promise<void>((resolve, reject) => {
@@ -69,4 +76,4 @@ it('installs a real pnpm graph, then executes approved scripts with the shared h
     })
     rmSync(root, { recursive: true, force: true })
   }
-}, 30_000)
+}, 60_000)

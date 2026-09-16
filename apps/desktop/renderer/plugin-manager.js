@@ -10,6 +10,7 @@ async function main() {
   document.querySelector('#description').textContent = messages.pluginManagerDescription
   document.querySelector('#refresh').textContent = messages.refresh
   document.querySelector('#package-label').textContent = messages.npmPackage
+  document.querySelector('#browse').textContent = messages.browseTarball
   document.querySelector('#install').textContent = messages.install
   document.querySelector('#installed-heading').textContent = messages.installed
   document.querySelector('#empty').textContent = messages.noPlugins
@@ -105,6 +106,16 @@ async function main() {
       await api.plugins.add(spec)
       input.value = ''
     }, message('installing', { spec }))
+  })
+  document.querySelector('#browse').addEventListener('click', () => {
+    void (async () => {
+      try {
+        const selected = await api.plugins.pickTarball()
+        if (typeof selected === 'string' && selected !== '') input.value = selected
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : String(error)
+      }
+    })()
   })
   document.querySelector('#retry').addEventListener('click', () => void run(() => api.backend.retry(), messages.retry))
   document.querySelector('#disable-all').addEventListener('click', () => void run(() => api.plugins.disableAll(), messages.changingActivation))

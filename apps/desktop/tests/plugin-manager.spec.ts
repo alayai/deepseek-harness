@@ -10,16 +10,21 @@ it('keeps disabled packages visible and offers recovery without a running backen
   let ready = false
   const disableAll = vi.fn(async () => { enabled = false; ready = true })
   const toggle = vi.fn(async (_name: string, active: boolean) => { enabled = active })
+  const pickTarball = vi.fn(async () => 'E:\\plugin.tgz')
   const api = {
     locale: async () => resolveDesktopLocale('en'),
     backend: { status: async () => ready ? { phase: 'ready' } : { phase: 'error', message: 'plugin requires Cordis ^2.0.0' }, retry: vi.fn() },
-    plugins: { list: async () => [{ name: 'example-plugin', version: '1.0.0', enabled }], disableAll, toggle },
+    plugins: { list: async () => [{ name: 'example-plugin', version: '1.0.0', enabled }], disableAll, toggle, pickTarball },
   }
   Object.defineProperty(dom.window, 'dshDesktop', { value: api })
   try {
     runInContext(readFileSync(new URL('../renderer/plugin-manager.js', import.meta.url), 'utf8'), dom.getInternalVMContext())
     const document = dom.window.document
     await expect.poll(() => document.querySelector('#plugins li')?.textContent).toContain('example-plugin')
+    expect(document.querySelector('#browse')?.textContent).toBe('Choose .tgz…')
+    document.querySelector<HTMLButtonElement>('#browse')?.click()
+    await expect.poll(() => document.querySelector<HTMLInputElement>('#package-spec')?.value).toBe('E:\\plugin.tgz')
+    expect(pickTarball).toHaveBeenCalledOnce()
     expect(document.querySelector<HTMLElement>('#recovery')?.hidden).toBe(false)
     expect(document.querySelector('#startup-error')?.textContent).toBe('plugin requires Cordis ^2.0.0')
     document.querySelector<HTMLButtonElement>('#disable-all')?.click()

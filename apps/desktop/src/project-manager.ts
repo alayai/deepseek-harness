@@ -3,6 +3,7 @@
 import { valid } from 'semver'
 import { spawn } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
   fsyncSync,
   ftruncateSync,
@@ -17,7 +18,8 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs'
-import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import {
   DESKTOP_HOST_PACKAGE,
   desktopCorePackageOverrides,
@@ -83,7 +85,14 @@ const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\nstrict
 const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*|[a-z0-9][a-z0-9._~-]*)$/u
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/u
 const MAX_PNPM_DIAGNOSTIC_BYTES = 64 * 1024
+const MAX_TARBALL_PACKAGE_JSON_BYTES = 1024 * 1024
 const DESKTOP_REGISTRY = 'https://registry.npmjs.org/'
+const VENDOR_DIR = 'desktop-plugins'
+
+/** Registry package or an absolute local npm tarball selected for installation. */
+export type DesktopPluginAddSource =
+  | { readonly kind: 'registry'; readonly spec: string; readonly name: string }
+  | { readonly kind: 'tarball'; readonly path: string }
 
 function errorOf(reason: unknown, fallback: string): Error {
   return reason instanceof Error ? reason : new Error(fallback)
@@ -146,6 +155,166 @@ export function packageNameFromSpec(spec: string): string {
   return name
 }
 
+function tarHeaderText(header: Buffer, start: number, length: number): string {
+  return header.subarray(start, start + length).toString('utf8').replace(/\0.*$/u, '').trim()
+}
+
+function tarEntryName(header: Buffer): string {
+  const name = tarHeaderText(header, 0, 100)
+  const prefix = tarHeaderText(header, 345, 155)
+  return prefix === '' ? name : `${prefix}/${name}`
+}
+
+function isRootPackageJson(name: string): boolean {
+  const parts = name.replaceAll('\\', '/').split('/').filter(part => part !== '' && part !== '.')
+  return parts.length === 2 && parts[1] === 'package.json'
+}
+
+function readTarballPackageIdentity(path: string): { name: string; version: string } {
+  let archive: Buffer
+  try {
+    archive = gunzipSync(readFileSync(path))
+  } catch {
+    throw new Error(`desktop project: plugin tarball is not a gzip archive ${JSON.stringify(path)}`)
+  }
+  let offset = 0
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512)
+    if (header.every(byte => byte === 0)) break
+    const size = Number.parseInt(tarHeaderText(header, 124, 12), 8)
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw new Error(`desktop project: invalid tar entry size in ${JSON.stringify(path)}`)
+    }
+    const name = tarEntryName(header)
+    const typeflag = String.fromCharCode(header[156] ?? 0)
+    offset += 512
+    const content = archive.subarray(offset, Math.min(archive.length, offset + size))
+    offset += Math.ceil(size / 512) * 512
+    if ((typeflag === '0' || typeflag === '\0') && isRootPackageJson(name)) {
+      if (size > MAX_TARBALL_PACKAGE_JSON_BYTES) {
+        throw new Error('desktop project: tarball package.json is too large')
+      }
+      const manifest = JSON.parse(content.toString('utf8')) as unknown
+      if (!isRecord(manifest) || typeof manifest.name !== 'string' || typeof manifest.version !== 'string') {
+        throw new Error('desktop project: tarball package.json is missing name or version')
+      }
+      assertPackageName(manifest.name)
+      if (valid(manifest.version) !== manifest.version) {
+        throw new Error(`desktop project: tarball ${manifest.name} does not declare an exact version`)
+      }
+      return { name: manifest.name, version: manifest.version }
+    }
+  }
+  throw new Error(`desktop project: tarball does not contain a package manifest ${JSON.stringify(path)}`)
+}
+
+function localTarballPath(spec: string): string | undefined {
+  let value = spec.trim()
+  if (value.startsWith('file:')) value = value.slice(5)
+  if (value === '' || value.startsWith('-') || value.includes('://')) return undefined
+  if (!/\.(?:tgz|tar\.gz)$/iu.test(value)) return undefined
+  if (!isAbsolute(value)) return undefined
+  return resolve(value)
+}
+
+function assertRegularTarballFile(path: string): void {
+  let stat: ReturnType<typeof lstatSync>
+  try {
+    stat = lstatSync(path)
+  } catch {
+    throw new Error(`desktop project: tarball not found ${JSON.stringify(path)}`)
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`desktop project: plugin tarball must be a regular file ${JSON.stringify(path)}`)
+  }
+}
+
+function vendoredFileName(name: string, version: string): string {
+  const safeName = name.replace(/^@/u, '').replaceAll('/', '-')
+  if (!/^[0-9A-Za-z._-]+$/u.test(safeName)) {
+    throw new Error(`desktop project: cannot vendor package ${JSON.stringify(name)}`)
+  }
+  return `${safeName}-${version}.tgz`
+}
+
+function vendoredDependencySpec(fileName: string): string {
+  return `file:./${VENDOR_DIR}/${fileName}`
+}
+
+function resolveVendoredTarball(projectDir: string, spec: string): string | undefined {
+  if (!spec.startsWith('file:')) return undefined
+  const relative = spec.slice('file:'.length).replace(/^\.\//u, '')
+  if (relative.split(/[/\\]/u).includes('..') || isAbsolute(relative)) return undefined
+  const normalized = relative.replaceAll('\\', '/')
+  const expectedPrefix = `${VENDOR_DIR}/`
+  if (!normalized.startsWith(expectedPrefix) || normalized.slice(expectedPrefix.length).includes('/')) return undefined
+  if (!/\.(?:tgz|tar\.gz)$/iu.test(normalized)) return undefined
+  const resolved = resolve(projectDir, normalized)
+  const vendorRoot = resolve(projectDir, VENDOR_DIR)
+  if (resolved !== vendorRoot && !resolved.startsWith(vendorRoot + sep)) return undefined
+  if (!existsSync(resolved)) return undefined
+  try {
+    const stat = lstatSync(resolved)
+    if (stat.isSymbolicLink() || !stat.isFile()) return undefined
+  } catch {
+    return undefined
+  }
+  return resolved
+}
+
+function isPluginDependencySpec(projectDir: string, spec: string): boolean {
+  return valid(spec) === spec || resolveVendoredTarball(projectDir, spec) !== undefined
+}
+
+function vendorTarball(
+  projectDir: string,
+  sourcePath: string,
+  identity: { name: string; version: string },
+): string {
+  const fileName = vendoredFileName(identity.name, identity.version)
+  mkdirSync(join(projectDir, VENDOR_DIR), { recursive: true, mode: 0o700 })
+  copyFileSync(sourcePath, join(projectDir, VENDOR_DIR, fileName))
+  return vendoredDependencySpec(fileName)
+}
+
+function setDependencySpec(projectDir: string, name: string, spec: string): void {
+  const path = join(projectDir, 'package.json')
+  const value = readJson(path)
+  if (!isRecord(value) || (value.dependencies !== undefined && !isRecord(value.dependencies))) {
+    throw new Error(`desktop project: invalid desktop profile manifest ${path}`)
+  }
+  writeJson(path, {
+    ...value,
+    dependencies: { ...(value.dependencies ?? {}), [name]: spec },
+  })
+}
+
+function removeOrphanedVendoredTarball(projectDir: string, spec: string | undefined): void {
+  if (spec === undefined) return
+  const path = resolveVendoredTarball(projectDir, spec)
+  if (path === undefined) return
+  const stillUsed = Object.values(projectManifest(projectDir).dependencies)
+    .some(value => resolveVendoredTarball(projectDir, value) === path)
+  if (stillUsed) return
+  unlinkSync(path)
+}
+
+/**
+ * Classify an install spec as a registry package or an absolute local tarball.
+ * @param spec - npm registry name/version or a filesystem path to a `.tgz`.
+ * @returns the install source the desktop project manager can execute.
+ */
+export function resolvePluginAddSource(spec: string): DesktopPluginAddSource {
+  const trimmed = spec.trim()
+  if (trimmed === '') throw new Error('desktop project: unsupported npm package spec ""')
+  const tarball = localTarballPath(trimmed)
+  if (tarball !== undefined) {
+    assertRegularTarballFile(tarball)
+    return { kind: 'tarball', path: tarball }
+  }
+  return { kind: 'registry', spec: trimmed, name: packageNameFromSpec(trimmed) }
+}
+
 function projectManifest(projectDir: string): DesktopProjectManifest {
   const path = join(projectDir, 'package.json')
   const value = readJson(path)
@@ -158,8 +327,8 @@ function projectManifest(projectDir: string): DesktopProjectManifest {
   }
   const manifest = { ...value, dependencies: value.dependencies ?? {} } as unknown as DesktopProjectManifest
   if (Object.entries(manifest.dependencies).some(([name, version]) => !PACKAGE_NAME_PATTERN.test(name)
-    || typeof version !== 'string' || valid(version) !== version)) {
-    throw new Error('desktop project: plugin dependencies must use exact registry versions')
+    || typeof version !== 'string' || !isPluginDependencySpec(projectDir, version))) {
+    throw new Error('desktop project: plugin dependencies must use exact registry versions or a vendored tarball')
   }
   return manifest
 }
@@ -376,11 +545,33 @@ export class DesktopProjectManager {
   private async applyMutation(projectDir: string, mutation: Exclude<DesktopProjectMutation, { type: 'plugins-disable-all' }>): Promise<void> {
     switch (mutation.type) {
       case 'plugin-add': {
-        const requestedName = packageNameFromSpec(mutation.spec)
-        if (this.currentRuntime().sharedPackages.some(entry => entry.name === requestedName)) {
-          throw new Error(`desktop project: cannot install host-owned package ${requestedName}`)
+        const source = resolvePluginAddSource(mutation.spec)
+        let requestedName: string
+        let addSpec: string
+        let vendoredSpec: string | undefined
+        if (source.kind === 'tarball') {
+          const identity = readTarballPackageIdentity(source.path)
+          requestedName = identity.name
+          if (this.currentRuntime().sharedPackages.some(entry => entry.name === requestedName)) {
+            throw new Error(`desktop project: cannot install host-owned package ${requestedName}`)
+          }
+          vendoredSpec = vendorTarball(projectDir, source.path, identity)
+          addSpec = `${requestedName}@${vendoredSpec}`
+        } else {
+          requestedName = source.name
+          if (this.currentRuntime().sharedPackages.some(entry => entry.name === requestedName)) {
+            throw new Error(`desktop project: cannot install host-owned package ${requestedName}`)
+          }
+          addSpec = source.spec
         }
-        await this.runPnpm(projectDir, ['add', mutation.spec, '--save-exact', '--ignore-scripts'])
+        const previousSpec = projectManifest(projectDir).dependencies[requestedName]
+        await this.runPnpm(projectDir, ['add', addSpec, '--save-exact', '--ignore-scripts'])
+        if (vendoredSpec !== undefined) {
+          setDependencySpec(projectDir, requestedName, vendoredSpec)
+          if (previousSpec !== undefined && previousSpec !== vendoredSpec) {
+            removeOrphanedVendoredTarball(projectDir, previousSpec)
+          }
+        }
         const installed = { ...inspectPlugin(projectDir, requestedName), enabled: true }
         const current = pluginRecords(projectDir).filter(plugin => plugin.name !== installed.name)
         writeProfilePlugins(
@@ -394,9 +585,11 @@ export class DesktopProjectManager {
         if (!Object.hasOwn(projectManifest(projectDir).dependencies, mutation.name)) {
           throw new Error(`desktop project: plugin ${JSON.stringify(mutation.name)} is not installed`)
         }
+        const previousSpec = projectManifest(projectDir).dependencies[mutation.name]
         const remaining = pluginRecords(projectDir).filter(plugin => plugin.name !== mutation.name)
         await this.runPnpm(projectDir, ['remove', mutation.name, '--config.ignore-scripts=true'])
         writeProfilePlugins(projectDir, remaining)
+        removeOrphanedVendoredTarball(projectDir, previousSpec)
         return
       }
       case 'plugin-update':
@@ -404,6 +597,9 @@ export class DesktopProjectManager {
         assertVersion(mutation.version)
         if (!Object.hasOwn(projectManifest(projectDir).dependencies, mutation.name)) {
           throw new Error(`desktop project: plugin ${JSON.stringify(mutation.name)} is not installed`)
+        }
+        if (projectManifest(projectDir).dependencies[mutation.name]?.startsWith('file:')) {
+          throw new Error('desktop project: tarball plugins are updated by installing a new tarball')
         }
         await this.runPnpm(projectDir, ['add', `${mutation.name}@${mutation.version}`, '--save-exact', '--ignore-scripts'])
         {

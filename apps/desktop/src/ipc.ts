@@ -9,6 +9,7 @@ export const DESKTOP_IPC = {
   localeGet: 'dsh-desktop:locale-get',
   pluginsList: 'dsh-desktop:plugins-list',
   pluginsAdd: 'dsh-desktop:plugins-add',
+  pluginsPickTarball: 'dsh-desktop:plugins-pick-tarball',
   pluginsRemove: 'dsh-desktop:plugins-remove',
   pluginsUpdate: 'dsh-desktop:plugins-update',
   pluginsToggle: 'dsh-desktop:plugins-toggle',
@@ -37,6 +38,7 @@ export interface DshDesktopApi {
   readonly plugins: {
     list(): Promise<readonly DesktopPluginRecord[]>
     add(spec: string): Promise<void>
+    pickTarball(): Promise<string | undefined>
     remove(name: string): Promise<void>
     update(name: string, version: string): Promise<void>
     toggle(name: string, enabled: boolean): Promise<void>
