@@ -2808,7 +2808,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'webServer',
     summary: 'The browser HTTP carrier service.',
-    description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.',
+    description: 'The browser HTTP carrier service. Activation listens when Config.listen is true. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber. `listen: false` still provides the route table for WebServer.fetchNamed.',
     methods: [
       {
         signature: 'register(route: WebRoute): () => void',
@@ -2833,6 +2833,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Register a raw-HTML index transform, the escape hatch for markup no IndexInjection row expresses: renderIndex applies taps in registration order after rendering the structured rows.',
         parameters: [{ name: 'transform', description: 'pure html-to-html function.' }],
         returns: 'the disposer removing the transform.',
+      },
+      {
+        signature: 'async fetchNamed(request: Request): Promise<Response | undefined>',
+        description: 'Dispatch a named route without a listening socket. Unmatched paths, including the fallback seat, return `undefined` so a pipe carrier can serve its own dist. Binary bodies (plugin icons) are preserved.',
+        parameters: [{ name: 'request', description: 'custom-protocol or HTTP request whose pathname is matched.' }],
+        returns: 'the route response, or `undefined` when no named route owns the path.',
       },
       {
         signature: 'applyIndexTaps(html: string): string',

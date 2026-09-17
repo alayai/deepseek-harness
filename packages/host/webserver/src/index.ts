@@ -2,18 +2,19 @@
  * @deepseek-ai/dsh-host-webserver — node:http route registration with optional
  * gzip, index injection, and one fallback seat. It knows no harness concepts
  * and serves no files; the composing application owns dist serving. Electron
- * uses file:// plus IPC instead, and this package never prints the URL.
+ * binds no socket: it dispatches named routes through {@link WebServer.fetchNamed}.
  * Route handlers retain direct response ownership.
  */
 
 import { createServer } from 'node:http'
-import type { IncomingMessage, ServerResponse, Server } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import compressionMiddleware from 'compression'
 import Negotiator from 'negotiator'
+import { fetchFromHttpHandler } from './carrier-fetch.ts'
 import { renderIndexInjections, type IndexInjection } from './injections.ts'
 
 export { renderIndexInjections } from './injections.ts'
@@ -61,6 +62,12 @@ export interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /**
+   * Bind a TCP socket. Desktop keeps this false and reaches named routes
+   * through {@link WebServer.fetchNamed} so the process opens no port.
+   * @default true
+   */
+  listen?: boolean
   /** Response compression for socket-backed HTTP requests. @default 'none' */
   compression?: 'none' | 'gzip'
   /** Gzip DEFLATE level from 0 through 9. @default 1 */
@@ -74,6 +81,7 @@ const DEFAULT_COMPRESSION_LEVEL = 1
 const DEFAULT_COMPRESSION_THRESHOLD_BYTES = 1024
 
 interface ResolvedConfig extends Config {
+  listen: boolean
   compression: 'none' | 'gzip'
   compressionLevel: number
   compressionThresholdBytes: number
@@ -115,16 +123,18 @@ function createGzipMiddleware(config: ResolvedConfig): NodeMiddleware {
 }
 
 /**
- * The browser HTTP carrier service. Activation listens immediately. Route
- * registration order does not affect requests because configured named routes
- * must be distinct, and the fallback handler answers anything not yet claimed
- * during startup with 404 until its owner registers. A listen failure rejects
- * initialization, and the boot process reports the failed fiber.
+ * The browser HTTP carrier service. Activation listens when {@link Config.listen}
+ * is true. Route registration order does not affect requests because configured
+ * named routes must be distinct, and the fallback handler answers anything not
+ * yet claimed during startup with 404 until its owner registers. A listen
+ * failure rejects initialization, and the boot process reports the failed fiber.
+ * `listen: false` still provides the route table for {@link WebServer.fetchNamed}.
  */
 export class WebServer extends Service {
   static Config: z<Config> = z.object({
     host: z.union([z.const('127.0.0.1'), z.const('0.0.0.0')]).required(),
     port: z.natural().max(65535).required(),
+    listen: z.boolean().default(true),
     compression: z.union([z.const('none'), z.const('gzip')]).default(DEFAULT_COMPRESSION),
     compressionLevel: z.number().step(1).min(0).max(9).default(DEFAULT_COMPRESSION_LEVEL),
     compressionThresholdBytes: z.natural().default(DEFAULT_COMPRESSION_THRESHOLD_BYTES),
@@ -136,8 +146,7 @@ export class WebServer extends Service {
   private readonly upgradedSockets = new Set<Duplex>()
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
-  private server!: Server
-  private listenedPort!: number
+  private listenedPort = 0
   private readonly gzip: NodeMiddleware | undefined
 
   constructor(ctx: Context, private config: Config) {
@@ -216,8 +225,29 @@ export class WebServer extends Service {
     }
   }
 
+  /**
+   * Dispatch a named route without a listening socket. Unmatched paths,
+   * including the fallback seat, return `undefined` so a pipe carrier can
+   * serve its own dist. Binary bodies (plugin icons) are preserved.
+   * @param request - custom-protocol or HTTP request whose pathname is matched.
+   * @returns the route response, or `undefined` when no named route owns the path.
+   */
+  async fetchNamed(request: Request): Promise<Response | undefined> {
+    let pathname: string
+    try {
+      pathname = new URL(request.url).pathname
+    } catch {
+      return new Response(null, { status: 400 })
+    }
+    const route = this.match(pathname)
+    if (route === undefined) return undefined
+    return await fetchFromHttpHandler(request, route.handler)
+  }
+
   /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
   async [Service.init](): Promise<void> {
+    if ((this.config as ResolvedConfig).listen === false) return
+
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
       requests; the field is only optional on the client-side IncomingMessage type */
@@ -239,7 +269,7 @@ export class WebServer extends Service {
     // rejection killing the process on one malformed request (bad %-escape,
     // client dropping mid-body). Per-request failures log and answer 400 —
     // never a process exit.
-    this.server = createServer((req, res) => {
+    const server = createServer((req, res) => {
       const next = (): void => {
         void handle(req, res).catch((err: unknown) => {
           this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))
@@ -254,7 +284,7 @@ export class WebServer extends Service {
       if (this.gzip === undefined) next()
       else this.gzip(req, res, next)
     })
-    this.server.on('upgrade', (req, socket, head) => {
+    server.on('upgrade', (req, socket, head) => {
       const onError = (error: Error): void => {
         this.ctx.logger.warn(error)
         socket.destroy()
@@ -290,11 +320,11 @@ export class WebServer extends Service {
     })
 
     await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject)
-      this.server.listen(this.config.port, this.config.host, () => {
-        this.server.off('error', reject)
-        this.server.on('error', (err) => { this.ctx.logger.error(err) })
-        this.listenedPort = (this.server.address() as AddressInfo).port
+      server.once('error', reject)
+      server.listen(this.config.port, this.config.host, () => {
+        server.off('error', reject)
+        server.on('error', (err) => { this.ctx.logger.error(err) })
+        this.listenedPort = (server.address() as AddressInfo).port
         resolve()
       })
     })
@@ -303,9 +333,9 @@ export class WebServer extends Service {
     // owns them with the other connections, so it tracks and destroys them explicitly.
     this.ctx.effect(() => async () => {
       const serverClosed = new Promise<void>((resolve) => {
-        this.server.close(() => { resolve() })
+        server.close(() => { resolve() })
       })
-      this.server.closeAllConnections()
+      server.closeAllConnections()
       const upgradedClosed = [...this.upgradedSockets].map(socket => new Promise<void>((resolve) => {
         socket.once('close', () => { resolve() })
         socket.destroy()

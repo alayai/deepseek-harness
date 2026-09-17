@@ -540,8 +540,14 @@ export class ClientModuleRegistry extends Service {
         'client-modules: bundle route',
       )
     }
-    if (ctx.get('webServer') === undefined) ctx.inject(['webServer'], registerWebCarrier)
-    else registerWebCarrier(ctx)
+    const webServer = ctx.get('webServer')
+    if (webServer === undefined) ctx.inject(['webServer'], registerWebCarrier)
+    else {
+      ctx.effect(
+        () => webServer.register({ kind: 'prefix', path: '/plugins', handler: this.serveBundle }),
+        'client-modules: bundle route',
+      )
+    }
     ctx.on('webserver/index-inject', (table) => {
       table.push(...bootInjections(this.composed))
     })

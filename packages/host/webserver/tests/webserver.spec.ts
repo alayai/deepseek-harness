@@ -28,7 +28,7 @@ afterEach(async () => {
 })
 
 /** Write a cordis.yml with one webserver row, then boot it through the real Loader. */
-async function loadComposition(port = 0, gzip = false): Promise<Context> {
+async function loadComposition(port = 0, gzip = false, listen = true): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-webserver-loader-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -36,6 +36,7 @@ async function loadComposition(port = 0, gzip = false): Promise<Context> {
     '  config:',
     "    host: '127.0.0.1'",
     `    port: ${String(port)}`,
+    `    listen: ${listen ? 'true' : 'false'}`,
     ...(gzip
       ? [
         '    compression: gzip',
@@ -101,6 +102,7 @@ describe('real Loader composition', () => {
     expect(HttpServer.Config({ host: '127.0.0.1', port: 0 })).toEqual({
       host: '127.0.0.1',
       port: 0,
+      listen: true,
       compression: 'none',
       compressionLevel: 1,
       compressionThresholdBytes: 1024,
@@ -377,5 +379,60 @@ describe('real Loader composition', () => {
       if (root !== undefined) await rm(root, { recursive: true, force: true })
       root = firstRoot
     }
+  })
+
+  it('dispatches named plugin routes without binding a socket', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition(0, false, false)
+    const server = loaded.webServer
+    expect(server.port).toBe(0)
+    const icon = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/icon',
+      handler: (_req, res) => {
+        res.writeHead(200, {
+          'cache-control': 'public, max-age=31536000, immutable',
+          'content-length': String(icon.byteLength),
+          'content-type': 'image/png',
+        })
+        res.end(icon)
+      },
+    })
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/echo',
+      handler: async (req, res) => {
+        const chunks: Buffer[] = []
+        for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          method: req.method,
+          url: req.url,
+          host: req.headers.host,
+          body: Buffer.concat(chunks).toString('utf8'),
+        }))
+      },
+    })
+
+    const image = await server.fetchNamed(new Request('dsh-app://app/dsh1024/icon'))
+    expect(image).toBeDefined()
+    expect(image!.status).toBe(200)
+    expect(image!.headers.get('content-type')).toBe('image/png')
+    expect(Buffer.from(await image!.arrayBuffer())).toEqual(icon)
+
+    const echoed = await server.fetchNamed(new Request('dsh-app://app/dsh1024/echo?revalidate=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"ok":true}',
+    }))
+    expect(echoed).toBeDefined()
+    expect(await echoed!.json()).toEqual({
+      method: 'POST',
+      url: '/dsh1024/echo?revalidate=1',
+      host: 'app',
+      body: '{"ok":true}',
+    })
+
+    expect(await server.fetchNamed(new Request('dsh-app://app/index.html'))).toBeUndefined()
   })
 })

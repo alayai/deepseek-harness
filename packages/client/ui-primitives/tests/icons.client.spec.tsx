@@ -82,11 +82,13 @@ describe('BrandWordmark', () => {
   it('can render the name artwork with or without its leading mark', () => {
     const view = render(<primitives.BrandWordmark />)
     const svg = view.container.querySelector('svg')!
-    expect(svg.getAttribute('width')).toBe('182')
-    expect(svg.getAttribute('viewBox')).toBe('0 0 182 24')
+    expect(svg.getAttribute('width')).toBe('176')
+    expect(svg.getAttribute('viewBox')).toBe('0 0 176 24')
+    expect(svg.textContent).toContain('ETRX一体机智能')
+    expect(svg.textContent).toContain('LITE')
 
     view.rerender(<primitives.BrandWordmark includeMark={false} />)
-    expect(svg.getAttribute('width')).toBe('156')
-    expect(svg.getAttribute('viewBox')).toBe('26 0 156 24')
+    expect(svg.getAttribute('width')).toBe('150')
+    expect(svg.getAttribute('viewBox')).toBe('26 0 150 24')
   })
 })

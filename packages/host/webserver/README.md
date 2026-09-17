@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Browsers reach the web GUI over HTTP through `dsh-host-webserver`: a `node:http` server where other plugins register named routes, upgrade routes, index startup inputs, and one fallback handler. It knows no harness concepts and serves no files — the `/api` bridge, plugin bundles, the HMR event stream, and the SPA dist belong to the plugins that register them. Route matching is fixed: exact over the whole table, then longest prefix, then the fallback handler. It serves browsers only; Electron loads dist over `file://` and carries fetch over an IPC bridge.
+Browsers reach the web GUI over HTTP through `dsh-host-webserver`: a `node:http` server where other plugins register named routes, upgrade routes, index startup inputs, and one fallback handler. It knows no harness concepts and serves no files — the `/api` bridge, plugin bundles, the HMR event stream, and the SPA dist belong to the plugins that register them. Route matching is fixed: exact over the whole table, then longest prefix, then the fallback handler. Electron binds no socket (`listen: false`) and dispatches those named routes through `fetchNamed`.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Browsers reach the web GUI over HTTP through `dsh-host-webserver`: a `node:http`
 <a id="use-this-package"></a>
 ## Use this package
 
-Compose the webserver as the HTTP transport of a browser-facing host, then let the feature plugins claim their routes. Activation listens immediately; registration order carries no request-facing semantics because named routes compose to be disjoint.
+Compose the webserver as the HTTP transport of a browser-facing host, then let the feature plugins claim their routes. Activation listens when `listen` is true; registration order carries no request-facing semantics because named routes compose to be disjoint. Desktop sets `listen: false` and calls `fetchNamed` instead of binding a port.
 
 ### Minimal configuration
 

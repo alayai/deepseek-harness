@@ -301,9 +301,10 @@ export async function runDesktopHost(
   const connection = ctx.get('connection')
   const clientModules = ctx.get('clientModules')
   const gateway = ctx.get('typertGateway')
-  if (connection === undefined || clientModules === undefined || gateway === undefined) {
+  const webServer = ctx.get('webServer')
+  if (connection === undefined || clientModules === undefined || gateway === undefined || webServer === undefined) {
     await ctx.fiber.dispose()
-    throw new Error('dsh desktop: composition did not provide connection, typertGateway, and clientModules')
+    throw new Error('dsh desktop: composition did not provide connection, typertGateway, clientModules, and webServer')
   }
   const api = connection.createSharedFetchHandler('/api')
   const assets = assetHandler(ctx, resolve(runtimeDir))
@@ -339,11 +340,17 @@ export async function runDesktopHost(
           signal: controller.signal,
         }
         const request = new Request(url, init)
-        const response = url.pathname === DESKTOP_STREAM_PATH
+        const pathname = url.pathname
+        // Named plugin routes (/dsh1024/icon, …) live on webServer. Desktop
+        // never listens; fetchNamed answers them without a TCP socket.
+        const pluginResponse = pathname === DESKTOP_STREAM_PATH || pathname.startsWith('/api/') || pathname.startsWith('/plugins/')
+          ? undefined
+          : await webServer.fetchNamed(request)
+        const response = pathname === DESKTOP_STREAM_PATH
           ? await streams.fetch(request)
-          : url.pathname.startsWith('/api/')
+          : pathname.startsWith('/api/')
             ? await api.fetch(request)
-            : await assets.fetch(request)
+            : pluginResponse ?? await assets.fetch(request)
         await writeResponse(encodeDesktopResponseStart(command.streamId, {
           status: response.status,
           headers: [...response.headers.entries()],
