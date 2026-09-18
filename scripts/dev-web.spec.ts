@@ -22,7 +22,7 @@ it('samples one local environment at startup without validating watcher outputs'
     writeClientBuildRecord(root, {
       DSH_CLIENT_BUILD_PROFILE: 'official',
       DSH_CLIENT_COMMIT_HASH: 'fffffff',
-      DSH_CLIENT_TITLE: 'ETRX一体机智能 LITE',
+      DSH_CLIENT_TITLE: 'ETRX一体机智能平台v1.0 LITE',
       DSH_CLIENT_VERSION: '1.2.2',
     })
     await writeFile(join(root, 'packages/client/example/lib/client.js'), 'module.exports = { changed: true }\n')

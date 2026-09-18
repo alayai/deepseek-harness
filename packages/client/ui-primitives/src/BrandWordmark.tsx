@@ -9,11 +9,13 @@ export interface BrandWordmarkProps extends IconProps {
 
 const VIEW_HEIGHT = 24
 const MARK_CROP_X = 26
-const VIEW_WIDTH = 176
+const VIEW_WIDTH = 248
 const NAME_WIDTH = VIEW_WIDTH - MARK_CROP_X
-const NAME = 'ETRX一体机智能'
+const NAME = 'ETRX一体机智能平台v1.0'
 const BADGE = 'LITE'
 const WORDMARK_FONT = "ui-sans-serif, system-ui, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif"
+const NAME_TEXT_STYLE = { fontSize: 14, fontWeight: 600, letterSpacing: 0 } as const
+const BADGE_TEXT_STYLE = { fontSize: 9, fontWeight: 700, letterSpacing: '0.04em' } as const
 
 /**
  * Render the full brand wordmark.
@@ -43,13 +45,15 @@ export function BrandWordmark({ size = 24, className, includeMark = true }: Bran
         fontFamily={WORDMARK_FONT}
         fontSize="14"
         fontWeight="600"
+        letterSpacing={0}
         dominantBaseline="central"
+        style={NAME_TEXT_STYLE}
       >
         {NAME}
       </text>
-      <rect x="140" y="5.5" width="32" height="14" rx="2" fill="currentColor" />
+      <rect x="212" y="5.5" width="32" height="14" rx="2" fill="currentColor" />
       <text
-        x="156"
+        x="228"
         y="12.5"
         fill="var(--dsw-alias-label-primary-inverted)"
         fontFamily={WORDMARK_FONT}
@@ -58,6 +62,7 @@ export function BrandWordmark({ size = 24, className, includeMark = true }: Bran
         letterSpacing="0.04em"
         textAnchor="middle"
         dominantBaseline="central"
+        style={BADGE_TEXT_STYLE}
       >
         {BADGE}
       </text>

@@ -80,8 +80,8 @@ describe('official browser-brand plugin', () => {
 
   it('renders the official name independently from both requested mark sizes', () => {
     const name = render(<OfficialBrandName />)
-    expect(name.container.querySelector('svg')?.getAttribute('viewBox')).toBe('26 0 150 24')
-    expect(name.container.querySelector('svg')?.textContent).toContain('ETRX一体机智能')
+    expect(name.container.querySelector('svg')?.getAttribute('viewBox')).toBe('26 0 222 24')
+    expect(name.container.querySelector('svg')?.textContent).toContain('ETRX一体机智能平台v1.0')
     expect(name.container.querySelector('svg')?.textContent).toContain('LITE')
     name.unmount()
 
