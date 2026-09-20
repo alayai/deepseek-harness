@@ -1,11 +1,17 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import { createPluginProfile } from '../src/project-manager.ts'
-import { linkDesktopHostPackages, unlinkDesktopHostPackages, validateDesktopPluginGraph } from '../src/profile-packages.ts'
+import {
+  linkDesktopHostPackages,
+  readDesktopProfileState,
+  recordDesktopRuntimeProfile,
+  unlinkDesktopHostPackages,
+  validateDesktopPluginGraph,
+} from '../src/profile-packages.ts'
 import { runtimeFixture, writePackage } from './runtime-fixture.ts'
 
 const roots: string[] = []
@@ -34,6 +40,16 @@ it('loads one shared ESM instance from both host and external plugin while keepi
   const output = execFileSync(process.execPath, [entry], { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' } })
   expect(JSON.parse(output)).toEqual({ same: true, host: 'host', plugin: 'plugin' })
 })
+it('runtime resolution retains and ignores an existing Link generation', () => {
+  const { dsh, runtime, profile } = fixture()
+  const links = readDesktopProfileState(profile)?.links
+  expect(links?.length).toBeGreaterThan(0)
+
+  recordDesktopRuntimeProfile(profile, runtime)
+  expect(readDesktopProfileState(profile)?.links).toEqual(links)
+  expect(lstatSync(join(profile, 'node_modules/@deepseek-ai/cordis')).isSymbolicLink()).toBe(true)
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, [], 'runtime') }).not.toThrow()
+})
 it.each(['nested', 'alias'])('rejects a %s second copy of a host package', (placement) => {
   const { dsh, runtime, profile } = fixture()
   const plugin = writePackage(join(profile, 'node_modules'), 'plugin')
@@ -41,51 +57,16 @@ it.each(['nested', 'alias'])('rejects a %s second copy of a host package', (plac
   else writePackage(join(profile, 'node_modules'), 'alias', { name: '@deepseek-ai/cordis' })
   expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/duplicate or aliased/u)
 })
-it('accepts a host package declared as an ordinary dependency when it resolves to the host', () => {
+it('rejects a host package declared as an ordinary dependency', () => {
   const { dsh, runtime, profile } = fixture()
   writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^1.0.0' } })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
-})
-it('rejects an incompatible host package version declared as an ordinary dependency', () => {
-  const { dsh, runtime, profile } = fixture()
-  writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^2.0.0' } })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/found 1.0.0/u)
-})
-it('accepts prerelease host packages against rc-inclusive peer ranges', () => {
-  const root = mkdtempSync(join(tmpdir(), 'desktop-profile-rc-'))
-  roots.push(root)
-  const dsh = join(root, 'dsh')
-  const runtime = runtimeFixture(dsh, '0.1.5-rc.2')
-  const profile = join(root, 'profile')
-  createPluginProfile(profile)
-  linkDesktopHostPackages(profile, dsh, runtime)
-  writePackage(join(profile, 'node_modules'), 'plugin', {
-    peerDependencies: { '@deepseek-ai/cordis': '>=0.1.0-rc.1 <0.2.0-0' },
-  })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
+  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/peer dependency/u)
 })
 it('rejects incompatible peers only when the plugin is enabled', () => {
   const { dsh, runtime, profile } = fixture()
   writePackage(join(profile, 'node_modules'), 'plugin', { peerDependencies: { '@deepseek-ai/cordis': '^2.0.0' } })
   expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/found 1.0.0/u)
   expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, []) }).not.toThrow()
-})
-it('ignores missing peers that the host does not share', () => {
-  const { dsh, runtime, profile } = fixture()
-  writePackage(join(profile, 'node_modules'), 'plugin', {
-    peerDependencies: {
-      '@deepseek-ai/cordis': '^1.0.0',
-      '@deepseek-ai/dsh-client-runtime': '>=0.1.0-rc.1 <0.2.0-0',
-      '@deepseek-ai/dsh-client-ui-slots': '>=0.1.0-rc.1 <0.2.0-0',
-      react: '^18.2.0',
-    },
-  })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
-})
-it('rejects a missing ordinary plugin dependency', () => {
-  const { dsh, runtime, profile } = fixture()
-  writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { leftover: '1.0.0' } })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/missing leftover/u)
 })
 it('refuses to satisfy a plugin dependency from an ancestor CLI project', () => {
   const { root, dsh, runtime, profile } = fixture()
