@@ -180,12 +180,15 @@ const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied
 // missing peers (cordis and friends) fall through to the healed
 // profiles/node_modules installation fallback, so every plugin shares the
 // installation's single cordis instance instead of a duplicate. pnpm ≥10
-// reads its settings from pnpm-workspace.yaml, not .npmrc.
+// reads its settings from pnpm-workspace.yaml, not .npmrc. `packages: - .`
+// makes the profile a workspace, so add/install of a new dependency at this
+// root needs ignoreWorkspaceRootCheck (or `pnpm add -w`).
 const PROFILE_PNPM_WORKSPACE = `packages:
   - .
 
 nodeLinker: hoisted
 autoInstallPeers: false
+ignoreWorkspaceRootCheck: true
 `
 
 /**

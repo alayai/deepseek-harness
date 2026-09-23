@@ -57,7 +57,7 @@ it('shows English loading and recovery actions without a Host document', async (
   const page = startup()
   await expect.poll(() => page.element('#title').textContent).not.toBe('')
   expect(page.copy()).toMatchInlineSnapshot(`
-    "Starting DeepSeek Harness…
+    "Loading CoCo AI LITE…
     Your workspace will open when it is ready."
   `)
   expect(page.element('main').getAttribute('aria-busy')).toBe('true')
@@ -90,7 +90,7 @@ it('shows Chinese loading and recovery copy', async () => {
   await expect.poll(() => page.element('#title').textContent).not.toBe('')
   expect(page.document.documentElement.lang).toBe('zh-CN')
   expect(page.copy()).toMatchInlineSnapshot(`
-    "正在启动 DeepSeek Harness…
+    "CoCo AI LITE版正在加载
     准备就绪后将自动打开工作区。"
   `)
   page.publish({ phase: 'error', profileRecovery: true, message: '插件加载失败' })

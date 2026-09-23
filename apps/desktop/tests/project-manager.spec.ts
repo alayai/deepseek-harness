@@ -238,6 +238,25 @@ describe('desktop external plugin profile', () => {
     await expect(retry.applyRelease()).resolves.toBe(false)
   })
 
+  it('lists remaining plugins when one installed package is missing its manifest', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    await manager.mutate({ type: 'plugin-add', spec: 'plugin@1.0.0' }, hooks())
+    await manager.mutate({ type: 'plugin-add', spec: '@scope/plugin@2.0.0' }, hooks())
+    rmSync(join(manager.paths.profile, 'node_modules/@scope'), { recursive: true, force: true })
+    expect(manager.listPlugins()).toEqual([{ name: 'plugin', version: '1.0.0', enabled: true }])
+  })
+
+  it('reinstalls plugins when node_modules disappeared after a matching runtime', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    await manager.mutate({ type: 'plugin-add', spec: 'plugin@1.0.0' }, hooks())
+    rmSync(join(manager.paths.profile, 'node_modules'), { recursive: true, force: true })
+    expect(manager.listPlugins()).toEqual([])
+    await expect(manager.applyRelease()).resolves.toBe(true)
+    expect(manager.listPlugins()).toEqual([{ name: 'plugin', version: '1.0.0', enabled: true }])
+  })
+
   it('preserves unknown files when initializing a profile', async () => {
     const { manager } = setup()
     mkdirSync(manager.paths.profile, { recursive: true })

@@ -52,17 +52,23 @@ export function createElectronBuilderConfig(
   }
   const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch))
+  const appIcon = fileURLToPath(new URL('./build/icon.ico', import.meta.url))
   return {
     appId,
     productName: 'DeepSeek Harness',
     artifactName: 'deepseek-harness-${version}-${os}-${arch}.${ext}',
-    directories: { output: unsigned ? join(buildPaths.root, 'unsigned-artifacts') : buildPaths.artifacts },
+    directories: {
+      output: unsigned ? join(buildPaths.root, 'unsigned-artifacts') : buildPaths.artifacts,
+      buildResources: fileURLToPath(new URL('./build', import.meta.url)),
+    },
+    icon: appIcon,
     asar: true,
     files: [
       'lib/*.js',
       'lib/*.cjs',
       'renderer/**/*',
       'package.json',
+      { from: 'build/icon.ico', to: 'icon.ico' },
       { from: buildPaths.dsh, to: 'dsh', filter: ['**/*'] },
       // electron-builder excludes a source directory's root node_modules.
       { from: join(buildPaths.dsh, 'node_modules'), to: 'dsh/node_modules', filter: ['**/*'] },
@@ -103,6 +109,7 @@ export function createElectronBuilderConfig(
       )
     },
     win: {
+      icon: appIcon,
       forceCodeSigning: !unsigned,
       signtoolOptions: {
         sign: windowsSigner,
@@ -112,10 +119,13 @@ export function createElectronBuilderConfig(
     },
     linux: {
       category: 'Development',
+      icon: fileURLToPath(new URL('./build/icon.png', import.meta.url)),
       target: ['AppImage'],
     },
     nsis: {
       include: fileURLToPath(new URL('./scripts/installer.nsh', import.meta.url)),
+      installerIcon: appIcon,
+      installerHeaderIcon: appIcon,
       oneClick: false,
       allowToChangeInstallationDirectory: true,
       differentialPackage: true,

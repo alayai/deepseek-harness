@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -50,6 +50,15 @@ it('runtime resolution retains and ignores an existing Link generation', () => {
   expect(lstatSync(join(profile, 'node_modules/@deepseek-ai/cordis')).isSymbolicLink()).toBe(true)
   expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, [], 'runtime') }).not.toThrow()
 })
+it('runtime resolution enables plugins even when leftover host links are broken', () => {
+  const { root, dsh, runtime, profile } = fixture()
+  writePackage(join(profile, 'node_modules'), 'plugin', { peerDependencies: { '@deepseek-ai/cordis': '^1.0.0' } })
+  const stale = writePackage(join(root, 'stale-runtime', 'node_modules'), '@deepseek-ai/cordis')
+  unlinkSync(join(profile, 'node_modules/@deepseek-ai/cordis'))
+  symlinkSync(stale, join(profile, 'node_modules/@deepseek-ai/cordis'), process.platform === 'win32' ? 'junction' : 'dir')
+  rmSync(stale, { recursive: true })
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin'], 'runtime') }).not.toThrow()
+})
 it.each(['nested', 'alias'])('rejects a %s second copy of a host package', (placement) => {
   const { dsh, runtime, profile } = fixture()
   const plugin = writePackage(join(profile, 'node_modules'), 'plugin')
@@ -57,10 +66,26 @@ it.each(['nested', 'alias'])('rejects a %s second copy of a host package', (plac
   else writePackage(join(profile, 'node_modules'), 'alias', { name: '@deepseek-ai/cordis' })
   expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/duplicate or aliased/u)
 })
-it('rejects a host package declared as an ordinary dependency', () => {
+it('binds a host package declared as an ordinary dependency to the host instance', () => {
   const { dsh, runtime, profile } = fixture()
   writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^1.0.0' } })
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/peer dependency/u)
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
+})
+it('rejects an incompatible host package version from either dependency field', () => {
+  const { dsh, runtime, profile } = fixture()
+  writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^2.0.0' } })
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/found 1.0.0/u)
+})
+it('allows an enabled plugin to omit client-only peers that the host graph supplies', () => {
+  const { dsh, runtime, profile } = fixture()
+  writePackage(join(profile, 'node_modules'), 'plugin', {
+    peerDependencies: {
+      '@deepseek-ai/cordis': '^1.0.0',
+      '@deepseek-ai/dsh-client-runtime': '>=0.1.0-rc.1',
+      react: '^18.2.0 || ^19.0.0',
+    },
+  })
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
 })
 it('rejects incompatible peers only when the plugin is enabled', () => {
   const { dsh, runtime, profile } = fixture()
@@ -98,5 +123,26 @@ it('rejects private package links instead of following cycles or old transaction
   const { dsh, runtime, profile } = fixture()
   const plugin = writePackage(join(profile, 'node_modules'), 'plugin')
   symlinkSync(plugin, join(profile, 'node_modules/alias'), process.platform === 'win32' ? 'junction' : 'dir')
-  expect(() =>{  validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/linked private package/u)
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/linked private package/u)
+})
+it('accepts pnpm store junctions that stay inside the profile', () => {
+  const { dsh, runtime, profile } = fixture()
+  const stored = writePackage(
+    join(profile, 'node_modules', '.pnpm', 'plugin@1.0.0', 'node_modules'),
+    'plugin',
+    { peerDependencies: { '@deepseek-ai/cordis': '^1.0.0' } },
+  )
+  symlinkSync(stored, join(profile, 'node_modules', 'plugin'), process.platform === 'win32' ? 'junction' : 'dir')
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
+})
+it('resolves private plugin dependencies from the pnpm virtual-store hoist', () => {
+  const { dsh, runtime, profile } = fixture()
+  const stored = writePackage(join(profile, 'node_modules', '.pnpm', 'ordinary@1.0.0', 'node_modules'), 'ordinary')
+  writePackage(join(profile, 'node_modules'), 'plugin', {
+    peerDependencies: { '@deepseek-ai/cordis': '^1.0.0' },
+    dependencies: { ordinary: '1.0.0' },
+  })
+  mkdirSync(join(profile, 'node_modules', '.pnpm', 'node_modules'), { recursive: true })
+  symlinkSync(stored, join(profile, 'node_modules', '.pnpm', 'node_modules', 'ordinary'), process.platform === 'win32' ? 'junction' : 'dir')
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
 })

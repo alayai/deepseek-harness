@@ -3,7 +3,7 @@
 export const en = {
   application: 'Application',
   startupFailed: 'DeepSeek Harness could not start',
-  startupLoading: 'Starting DeepSeek Harness…',
+  startupLoading: 'Loading CoCo AI LITE…',
   startupLoadingDescription: 'Your workspace will open when it is ready.',
   startupErrorDescription: 'Choose a recovery action below. Disabling third-party plugins retains their files.',
   startupReinstallAdvice: 'If application files are missing or damaged, close the application and reinstall it. Your tasks are stored separately.',
@@ -58,7 +58,7 @@ export type DesktopMessages = { readonly [Key in keyof typeof en]: string }
 export const zh = {
   application: '应用',
   startupFailed: 'DeepSeek Harness 无法启动',
-  startupLoading: '正在启动 DeepSeek Harness…',
+  startupLoading: 'CoCo AI LITE版正在加载',
   startupLoadingDescription: '准备就绪后将自动打开工作区。',
   startupErrorDescription: '请选择下方的恢复操作。禁用第三方插件会保留插件文件。',
   startupReinstallAdvice: '如果应用文件缺失或损坏，请关闭应用并重新安装。任务数据存储在独立位置。',

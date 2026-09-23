@@ -83,7 +83,7 @@ const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
 const DESKTOP_PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] as const
-const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\nstrictDepBuilds: true\n'
+const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\nstrictDepBuilds: true\nignoreWorkspaceRootCheck: true\n'
 const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*|[a-z0-9][a-z0-9._~-]*)$/u
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/u
 const MAX_PNPM_DIAGNOSTIC_BYTES = 64 * 1024
@@ -348,8 +348,32 @@ function profilePluginNames(projectDir: string): readonly string[] {
   return plugins
 }
 
+function declaredPluginNames(projectDir: string): readonly string[] {
+  return Object.keys(projectManifest(projectDir).dependencies).sort()
+}
+
+function pluginManifestPath(projectDir: string, name: string): string {
+  return join(projectDir, 'node_modules', ...name.split('/'), 'package.json')
+}
+
+function pluginsAreInstalled(projectDir: string): boolean {
+  return declaredPluginNames(projectDir).every(name => existsSync(pluginManifestPath(projectDir, name)))
+}
+
 function pluginRecords(projectDir: string): readonly DesktopPluginRecord[] {
-  return Object.keys(projectManifest(projectDir).dependencies).sort().map(name => inspectPlugin(projectDir, name))
+  return declaredPluginNames(projectDir).map(name => inspectPlugin(projectDir, name))
+}
+
+function listablePluginRecords(projectDir: string): readonly DesktopPluginRecord[] {
+  const records: DesktopPluginRecord[] = []
+  for (const name of declaredPluginNames(projectDir)) {
+    try {
+      records.push(inspectPlugin(projectDir, name))
+    } catch {
+      // A missing or damaged package must not hide the rest of the inventory.
+    }
+  }
+  return records
 }
 
 function writeProfilePlugins(projectDir: string, plugins: readonly DesktopPluginRecord[]): void {
@@ -405,8 +429,12 @@ export class DesktopProjectManager {
 
   /** Read the active desktop plugin inventory. */
   listPlugins(): readonly DesktopPluginRecord[] {
-    if (!existsSync(this.paths.profile)) return []
-    return pluginRecords(this.paths.profile)
+    if (!existsSync(join(this.paths.profile, 'package.json'))) return []
+    try {
+      return listablePluginRecords(this.paths.profile)
+    } catch {
+      return []
+    }
   }
 
   /**
@@ -483,6 +511,7 @@ export class DesktopProjectManager {
       const previous = readDesktopProfileState(this.paths.profile)
       if (!existsSync(this.pendingPackages) && previous?.runtimeId === desktopRuntimeId(target)
         && previous.lockHash === desktopPluginLockHash(this.paths.profile)
+        && pluginsAreInstalled(this.paths.profile)
         && (this.runtime.profileResolution === 'runtime' || (previous.links.length === target.sharedPackages.length
           && previous.links.every(link => existsSync(link.target)
           && existsSync(join(this.paths.profile, 'node_modules', link.name))
@@ -530,8 +559,11 @@ export class DesktopProjectManager {
 
   private async reconcileProfile(projectDir: string, previous: DesktopProfileState | undefined, packagesChanged = false): Promise<void> {
     const target = this.currentRuntime()
+    const declared = declaredPluginNames(projectDir)
+    const missingPlugins = declared.some(name => !existsSync(pluginManifestPath(projectDir, name)))
     const rebuild = (!packagesChanged && existsSync(this.pendingPackages))
-      || (previous !== undefined && pluginRecords(projectDir).length > 0
+      || missingPlugins
+      || (previous !== undefined && declared.length > 0
       && (previous.nodeVersion !== target.release.nodeVersion || previous.platform !== target.platform || previous.arch !== target.arch))
     if (rebuild) {
       writeFileSync(this.pendingPackages, '')
@@ -652,6 +684,8 @@ export class DesktopProjectManager {
         `--config.store-dir=${this.paths.pnpm.store}`,
         '--config.enable-global-virtual-store=false',
         `--config.userconfig=${npmrc}`,
+        '--config.ignore-workspace-root-check=true',
+        '--config.auto-install-peers=false',
         command,
         ...commandArgs,
       ], {

@@ -28,6 +28,24 @@ import { INSTALL_ANCHOR } from './profile-boot.ts'
 const NAME = 'dsh'
 
 /**
+ * Profile directories are pnpm workspaces (`packages: - .` so nodeLinker
+ * settings apply). pnpm refuses `add` at a workspace root unless the caller
+ * is explicit; existing profiles may predate `ignoreWorkspaceRootCheck` in
+ * the workspace file, so every forwarded invocation sets it.
+ *
+ * Peers stay uninstalled here on purpose: the dsh installation's module
+ * fallback supplies cordis/client packages. Auto-installing peers collapses
+ * overlapping prerelease ranges into unsatisfiable stable ranges
+ * (`>=0.1.0 <0.2.0-0` with only `*-rc.*` on the registry). The workspace
+ * file already declares `autoInstallPeers: false`, but `pnpm add` does not
+ * always honor that setting alone — pin it on every forward.
+ */
+const PNPM_PROFILE_FLAGS = [
+  '--config.ignore-workspace-root-check=true',
+  '--config.auto-install-peers=false',
+] as const
+
+/**
  * Whether a resolved dependency exports a profile patch, i.e. is a bundle.
  * @param packageName - the dependency's package name.
  * @param profileDir - the profile directory (resolution anchor).
@@ -131,7 +149,10 @@ export function runPlugin(profile: string, args: readonly string[]): number {
   const before = readProfileManifest(NAME, dir)
   // Windows resolves pnpm through its .cmd shim, which spawn() refuses
   // without a shell since the CVE-2024-27980 hardening.
-  const result = spawnSync('pnpm', args.map(argument => anchorPathSpec(argument, process.cwd())), {
+  const result = spawnSync('pnpm', [
+    ...PNPM_PROFILE_FLAGS,
+    ...args.map(argument => anchorPathSpec(argument, process.cwd())),
+  ], {
     cwd: dir,
     stdio: 'inherit',
     shell: process.platform === 'win32',

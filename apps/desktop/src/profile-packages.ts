@@ -193,13 +193,24 @@ function manifest(path: string): PackageManifest {
     optionalDependencies: dependencies('optionalDependencies'), peerDependencies: dependencies('peerDependencies'), optionalPeers }
 }
 
-function packageFrom(anchor: string, name: string): string | undefined {
+function resolvedPackage(anchor: string, name: string): string | undefined {
   if (!PACKAGE_NAME.test(name)) throw new Error(`desktop profile: invalid package name ${name}`)
   for (const modules of createRequire(join(anchor, 'package.json')).resolve.paths(name) ?? []) {
     const path = join(modules, name)
     if (existsSync(join(path, 'package.json'))) return realpathSync.native(path)
   }
   return undefined
+}
+
+function packageFrom(anchor: string, name: string, profileRoot: string): string | undefined {
+  const resolved = resolvedPackage(anchor, name)
+  if (resolved !== undefined && inside(profileRoot, resolved)) return resolved
+  // pnpm keeps private packages in the virtual store instead of hoisting them
+  // next to flattened plugin copies that Node's ancestor walk can see.
+  const hoisted = join(profileRoot, 'node_modules', '.pnpm', 'node_modules', name)
+  if (!existsSync(join(hoisted, 'package.json'))) return undefined
+  const canonical = realpathSync.native(hoisted)
+  return inside(profileRoot, canonical) ? canonical : undefined
 }
 
 /**
@@ -228,7 +239,7 @@ export function validateDesktopPluginGraph(
   }))
   if (resolutionMode === 'link') {
     for (const [name, entry] of shared) {
-      if (packageFrom(profile, name) !== entry.path) throw new Error(`desktop profile: missing or incorrect host link ${name}`)
+      if (resolvedPackage(profile, name) !== entry.path) throw new Error(`desktop profile: missing or incorrect host link ${name}`)
     }
   }
   if (activePlugins.length === 0) return
@@ -243,7 +254,12 @@ export function validateDesktopPluginGraph(
       if (entry.name.startsWith('.')) continue
       const path = join(modules, entry.name)
       if (entry.name.startsWith('@')) { scan(path); continue }
-      if (!existsSync(join(path, 'package.json'))) throw new Error(`desktop profile: invalid installed package ${path}`)
+      if (!existsSync(join(path, 'package.json'))) {
+        // Leftover host junctions from a prior Link generation can survive a
+        // runtime upgrade after their targets are deleted.
+        if (lstatSync(path).isSymbolicLink() || realpathOrUndefined(path) === undefined) continue
+        throw new Error(`desktop profile: invalid installed package ${path}`)
+      }
       const canonical = realpathSync.native(path)
       const info = manifest(canonical)
       const host = shared.get(info.name)
@@ -253,7 +269,12 @@ export function validateDesktopPluginGraph(
         }
         continue
       }
-      if (entry.isSymbolicLink()) throw new Error(`desktop profile: linked private package ${path}`)
+      if (lstatSync(path).isSymbolicLink()) {
+        const store = join(profileRoot, 'node_modules', '.pnpm')
+        if (!inside(store, canonical)) {
+          throw new Error(`desktop profile: linked private package ${path}`)
+        }
+      }
       if (!inside(profileRoot, canonical)) throw new Error(`desktop profile: package resolves outside profile: ${path}`)
       scan(join(path, 'node_modules'))
     }
@@ -269,18 +290,22 @@ export function validateDesktopPluginGraph(
       const peer = name in info.peerDependencies
       const optional = peer ? info.optionalPeers.has(name) : name in info.optionalDependencies
       const host = shared.get(name)
-      if (host !== undefined && name in deps) throw new Error(`desktop profile: ${chain} must declare ${name} as a peer dependency`)
       if (host !== undefined) {
-        if (peer && !satisfies(host.version, range)) {
+        // First-party packages put shared libraries such as schemastery in
+        // dependencies; bind those to the host instance instead of requiring a
+        // peer rewrite of every external plugin.
+        if (!satisfies(host.version, range)) {
           throw new Error(`desktop profile: ${chain} requires ${name}@${range}, found ${host.version}`)
         }
         continue
       }
-      const target = packageFrom(path, name)
-      if (target === undefined && optional) continue
-      if (target === undefined) throw new Error(`desktop profile: ${chain} requires missing ${name}@${range}`)
-      if (!inside(profileRoot, target)) {
-        throw new Error(`desktop profile: ${chain} resolves ${name} outside its owned packages`)
+      const target = packageFrom(path, name, profileRoot)
+      if (target === undefined) {
+        if (optional || peer) continue
+        if (resolvedPackage(path, name) !== undefined) {
+          throw new Error(`desktop profile: ${chain} resolves ${name} outside its owned packages`)
+        }
+        throw new Error(`desktop profile: ${chain} requires missing ${name}@${range}`)
       }
       const dependency = manifest(target)
       if (peer && !satisfies(dependency.version, range)) {
@@ -290,8 +315,8 @@ export function validateDesktopPluginGraph(
     }
   }
   for (const name of activePlugins) {
-    const path = packageFrom(profile, name)
-    if (path === undefined || !inside(profileRoot, path)) throw new Error(`desktop profile: missing local plugin ${name}`)
+    const path = packageFrom(profile, name, profileRoot)
+    if (path === undefined) throw new Error(`desktop profile: missing local plugin ${name}`)
     visit(path, name)
   }
 }

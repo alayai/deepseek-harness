@@ -19,7 +19,8 @@ export function removeOwnedDirectory(path: string): void {
   // Electron's recursive rm follows nested Windows junctions into installed resources.
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const child = join(path, entry.name)
-    if (entry.isDirectory()) removeOwnedDirectory(child)
+    if (entry.isSymbolicLink()) unlinkSync(child)
+    else if (entry.isDirectory()) removeOwnedDirectory(child)
     else unlinkSync(child)
   }
   rmdirSync(path)

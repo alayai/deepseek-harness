@@ -91,6 +91,12 @@ function developmentHostInspectPort(enabled: boolean): number | undefined {
   return port
 }
 
+function resolveAppIcon(): string {
+  return app.isPackaged
+    ? join(app.getAppPath(), 'icon.ico')
+    : fileURLToPath(new URL('../build/icon.ico', import.meta.url))
+}
+
 function createWindow(preload: string, show = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -98,6 +104,7 @@ function createWindow(preload: string, show = false): BrowserWindow {
     minWidth: 880,
     minHeight: 600,
     show,
+    icon: resolveAppIcon(),
     webPreferences: {
       preload,
       nodeIntegration: false,
