@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const spawnSync = vi.hoisted(() => vi.fn(() => ({ status: 0 })))
+const spawnSync = vi.hoisted(() => vi.fn((_command?: string, _args?: readonly string[], _options?: object) => ({ status: 0 })))
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return { ...actual, spawnSync }
@@ -37,30 +37,35 @@ describe('runPlugin', () => {
     const home = withHome()
     expect(runPlugin('web', ['add', 'dsh1024@latest'])).toBe(0)
     expect(spawnSync).toHaveBeenCalledOnce()
-    const [command, args, options] = spawnSync.mock.calls[0]!
-    expect(command).toBe('pnpm')
-    expect(args).toEqual([
-      '--config.ignore-workspace-root-check=true',
-      '--config.auto-install-peers=false',
-      'add',
-      'dsh1024@latest',
-    ])
-    expect(options).toMatchObject({
-      cwd: resolveProfileDir('web', home),
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    })
+    expect(spawnSync).toHaveBeenCalledWith(
+      'pnpm',
+      [
+        '--config.ignore-workspace-root-check=true',
+        '--config.auto-install-peers=false',
+        'add',
+        'dsh1024@latest',
+      ],
+      expect.objectContaining({
+        cwd: resolveProfileDir('web', home),
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      }),
+    )
   })
 
   it('anchors a relative add spec to the invoking directory', () => {
     withHome()
     const cwd = process.cwd()
     expect(runPlugin('web', ['add', '.'])).toBe(0)
-    expect(spawnSync.mock.calls[0]![1]).toEqual([
-      '--config.ignore-workspace-root-check=true',
-      '--config.auto-install-peers=false',
-      'add',
-      resolve(cwd, '.'),
-    ])
+    expect(spawnSync).toHaveBeenCalledWith(
+      'pnpm',
+      [
+        '--config.ignore-workspace-root-check=true',
+        '--config.auto-install-peers=false',
+        'add',
+        resolve(cwd, '.'),
+      ],
+      expect.anything(),
+    )
   })
 })
