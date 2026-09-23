@@ -301,7 +301,7 @@ export function validateDesktopPluginGraph(
       }
       const target = packageFrom(path, name, profileRoot)
       if (target === undefined) {
-        if (optional || peer) continue
+        if (optional) continue
         if (resolvedPackage(path, name) !== undefined) {
           throw new Error(`desktop profile: ${chain} resolves ${name} outside its owned packages`)
         }

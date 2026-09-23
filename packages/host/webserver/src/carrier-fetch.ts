@@ -1,14 +1,12 @@
 /**
  * WHATWG `Request` → node:http pair for carriers that never bind a socket.
  * Named-route handlers keep their IncomingMessage/ServerResponse contract;
- * Electron and other pipe transports collect the same writes into a Response.
+ * Electron and other pipe transports expose the same writes through a Response.
  */
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http'
 
-const encoder = new TextEncoder()
-
 function bytesOf(chunk: string | Uint8Array): Uint8Array {
-  return typeof chunk === 'string' ? encoder.encode(chunk) : chunk
+  return typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk)
 }
 
 function headerRecord(headers: OutgoingHttpHeaders | undefined): Record<string, string> {
@@ -42,12 +40,12 @@ function writeHeadArgs(
 }
 
 /**
- * Dispatch one fetch request through a node:http route handler and collect
- * its `writeHead`/`write`/`end` into a Response. The handler owns completion;
- * this adapter does not invent a fallback status.
+ * Dispatch one fetch request through a node:http route handler. The Response
+ * is published when its headers are sent, and later writes stream into its
+ * body. The handler owns completion; this adapter does not invent a fallback.
  * @param request - carrier request (custom schemes included).
  * @param handler - registered webserver route handler.
- * @returns the handler's complete response.
+ * @returns the handler's response once its headers are sent.
  */
 export async function fetchFromHttpHandler(
   request: Request,
@@ -71,30 +69,72 @@ export async function fetchFromHttpHandler(
 
   let status = 200
   let responseHeaders: Record<string, string> = {}
-  let finished = false
-  const chunks: Uint8Array[] = []
+  let headersSent = false
+  let writableEnded = false
+  let terminal = false
+  let streamFinished = false
+  let needsDrain = false
   const listeners = new Map<string, Set<() => void>>()
+  const onceListeners = new Map<string, Map<() => void, () => void>>()
   let resolveResponse!: (response: Response) => void
   let rejectResponse!: (error: unknown) => void
   const done = new Promise<Response>((resolve, reject) => {
     resolveResponse = resolve
     rejectResponse = reject
   })
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      streamController = controller
+    },
+    pull() {
+      if (!needsDrain) return
+      needsDrain = false
+      emit('drain')
+    },
+    cancel() {
+      if (terminal) return
+      terminal = true
+      streamFinished = true
+      emit('close')
+    },
+  })
 
   const emit = (event: string): void => {
     for (const callback of [...(listeners.get(event) ?? [])]) callback()
   }
 
+  const finishStream = (error?: unknown): void => {
+    if (streamFinished) return
+    streamFinished = true
+    if (error === undefined) streamController.close()
+    else streamController.error(error)
+  }
+
+  const publish = (): void => {
+    if (headersSent || terminal) return
+    const carriesBody = request.method !== 'HEAD' && status !== 204 && status !== 205 && status !== 304
+    const response = new Response(carriesBody ? stream : null, { status, headers: responseHeaders })
+    headersSent = true
+    if (!carriesBody) finishStream()
+    resolveResponse(response)
+  }
+
   const complete = (error?: unknown): void => {
-    if (finished) return
-    finished = true
-    emit('close')
-    if (error !== undefined) {
-      rejectResponse(error)
-      return
+    if (terminal) return
+    if (!headersSent) {
+      if (error !== undefined) {
+        terminal = true
+        finishStream()
+        rejectResponse(error)
+        emit('close')
+        return
+      }
+      publish()
     }
-    const bodyBytes = chunks.length === 0 ? null : new Uint8Array(Buffer.concat(chunks))
-    resolveResponse(new Response(bodyBytes, { status, headers: responseHeaders }))
+    terminal = true
+    finishStream(error)
+    emit('close')
   }
 
   const res: Record<string, unknown> = {
@@ -105,9 +145,11 @@ export async function fetchFromHttpHandler(
     ): unknown {
       status = nextStatus
       responseHeaders = { ...responseHeaders, ...headerRecord(writeHeadArgs(statusMessageOrHeaders, maybeHeaders)) }
+      publish()
       return res
     },
     setHeader(name: string, value: string | number | readonly string[]): unknown {
+      if (headersSent) throw new Error('Cannot set headers after they are sent to the client')
       responseHeaders[name.toLowerCase()] = Array.isArray(value) ? value.map(String).join(', ') : String(value)
       return res
     },
@@ -115,17 +157,26 @@ export async function fetchFromHttpHandler(
       return responseHeaders[name.toLowerCase()]
     },
     write(chunk: string | Uint8Array): boolean {
-      if (finished) return false
-      chunks.push(bytesOf(chunk))
-      return true
+      if (terminal) return false
+      publish()
+      if (!streamFinished) streamController.enqueue(bytesOf(chunk))
+      const writable = streamFinished || (streamController.desiredSize ?? 0) > 0
+      needsDrain ||= !writable
+      return writable
     },
     end(chunk?: string | Uint8Array): unknown {
-      if (chunk !== undefined) chunks.push(bytesOf(chunk))
+      if (terminal) return res
+      writableEnded = true
+      if (chunk !== undefined) {
+        publish()
+        if (!streamFinished) streamController.enqueue(bytesOf(chunk))
+      }
       complete()
       return res
     },
-    destroy(): void {
-      complete(new Error(`webserver: carrier response destroyed for ${request.method} ${url.pathname}`))
+    destroy(error?: Error): unknown {
+      complete(error ?? new Error(`webserver: carrier response destroyed for ${request.method} ${url.pathname}`))
+      return res
     },
     on(event: string, callback: () => void): unknown {
       const set = listeners.get(event) ?? new Set<() => void>()
@@ -133,20 +184,37 @@ export async function fetchFromHttpHandler(
       listeners.set(event, set)
       return res
     },
+    once(event: string, callback: () => void): unknown {
+      const wrapped = (): void => {
+        listeners.get(event)?.delete(wrapped)
+        onceListeners.get(event)?.delete(callback)
+        callback()
+      }
+      const wrappers = onceListeners.get(event) ?? new Map<() => void, () => void>()
+      wrappers.set(callback, wrapped)
+      onceListeners.set(event, wrappers)
+      const set = listeners.get(event) ?? new Set<() => void>()
+      set.add(wrapped)
+      listeners.set(event, set)
+      return res
+    },
     off(event: string, callback: () => void): unknown {
       listeners.get(event)?.delete(callback)
+      const wrapped = onceListeners.get(event)?.get(callback)
+      if (wrapped !== undefined) listeners.get(event)?.delete(wrapped)
+      onceListeners.get(event)?.delete(callback)
       return res
     },
   }
-  res.once = res.on
-  Object.defineProperty(res, 'headersSent', { get: () => chunks.length > 0 || Object.keys(responseHeaders).length > 0 })
-  Object.defineProperty(res, 'writableEnded', { get: () => finished })
+  Object.defineProperty(res, 'statusCode', {
+    get: () => status,
+    set: (nextStatus: number) => { status = nextStatus },
+  })
+  Object.defineProperty(res, 'headersSent', { get: () => headersSent })
+  Object.defineProperty(res, 'writableEnded', { get: () => writableEnded })
 
   try {
-    await handler(req, res as unknown as ServerResponse)
-    if (!finished) {
-      complete(new Error(`webserver: ${request.method} ${url.pathname} did not finish its response`))
-    }
+    void Promise.resolve(handler(req, res as unknown as ServerResponse)).catch(complete)
   } catch (error) {
     complete(error)
   }

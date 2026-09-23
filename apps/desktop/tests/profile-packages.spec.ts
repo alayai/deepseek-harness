@@ -12,14 +12,24 @@ import {
   unlinkDesktopHostPackages,
   validateDesktopPluginGraph,
 } from '../src/profile-packages.ts'
+import { writeDesktopRuntime } from '../src/runtime-tree.ts'
 import { runtimeFixture, writePackage } from './runtime-fixture.ts'
 
 const roots: string[] = []
-function fixture() {
+function fixture(additionalShared: Readonly<Record<string, string>> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'desktop-profile-'))
   roots.push(root)
   const dsh = join(root, 'dsh')
-  const runtime = runtimeFixture(dsh)
+  let runtime = runtimeFixture(dsh)
+  for (const [name, version] of Object.entries(additionalShared)) {
+    writePackage(join(dsh, 'node_modules'), name, { version })
+  }
+  if (Object.keys(additionalShared).length > 0) {
+    runtime = writeDesktopRuntime(dsh, runtime.release, [
+      ...runtime.sharedPackages.map(entry => entry.name),
+      ...Object.keys(additionalShared),
+    ])
+  }
   const profile = join(root, 'profile')
   createPluginProfile(profile)
   linkDesktopHostPackages(profile, dsh, runtime)
@@ -76,8 +86,11 @@ it('rejects an incompatible host package version from either dependency field', 
   writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^2.0.0' } })
   expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/found 1.0.0/u)
 })
-it('allows an enabled plugin to omit client-only peers that the host graph supplies', () => {
-  const { dsh, runtime, profile } = fixture()
+it('accepts client-only peers supplied by the host graph', () => {
+  const { dsh, runtime, profile } = fixture({
+    '@deepseek-ai/dsh-client-runtime': '1.0.0',
+    react: '19.0.0',
+  })
   writePackage(join(profile, 'node_modules'), 'plugin', {
     peerDependencies: {
       '@deepseek-ai/cordis': '^1.0.0',
@@ -86,6 +99,18 @@ it('allows an enabled plugin to omit client-only peers that the host graph suppl
     },
   })
   expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
+})
+it('rejects a missing required peer and permits a missing optional peer', () => {
+  const { dsh, runtime, profile } = fixture()
+  writePackage(join(profile, 'node_modules'), 'required-plugin', {
+    peerDependencies: { '@deepseek-ai/cordis': '^1.0.0', missing: '^1.0.0' },
+  })
+  writePackage(join(profile, 'node_modules'), 'optional-plugin', {
+    peerDependencies: { '@deepseek-ai/cordis': '^1.0.0', optional: '^1.0.0' },
+    peerDependenciesMeta: { optional: { optional: true } },
+  })
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['required-plugin']) }).toThrow(/requires missing missing@\^1\.0\.0/u)
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['optional-plugin']) }).not.toThrow()
 })
 it('rejects incompatible peers only when the plugin is enabled', () => {
   const { dsh, runtime, profile } = fixture()

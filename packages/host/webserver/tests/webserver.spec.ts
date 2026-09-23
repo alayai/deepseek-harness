@@ -394,6 +394,52 @@ describe('real Loader composition', () => {
         res.end(icon)
       },
     })
+    let headersSentAfterSet = true
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/status',
+      handler: (_req, res) => {
+        res.setHeader('content-type', 'text/plain')
+        headersSentAfterSet = res.headersSent
+        res.statusCode = 418
+        res.end('teapot')
+      },
+    })
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/no-content',
+      handler: (_req, res) => {
+        res.writeHead(204)
+        res.end()
+      },
+    })
+    let initialWriteAccepted = true
+    let drainCount = 0
+    let writeStream!: (chunk: string) => void
+    let endStream!: (chunk: string) => void
+    let destroyStream!: () => void
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/stream',
+      handler: (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        initialWriteAccepted = res.write('first')
+        if (!initialWriteAccepted) res.once('drain', () => { drainCount += 1 })
+        writeStream = (chunk) => { res.write(chunk) }
+        endStream = (chunk) => { res.end(chunk) }
+        destroyStream = () => { res.destroy() }
+      },
+    })
+    let cancelled = false
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/cancel',
+      handler: (_req, res) => {
+        res.on('close', () => { cancelled = true })
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        res.write('open')
+      },
+    })
     server.register({
       kind: 'exact',
       path: '/dsh1024/echo',
@@ -428,6 +474,39 @@ describe('real Loader composition', () => {
       host: 'app',
       body: '{"ok":true}',
     })
+
+    const status = await server.fetchNamed(new Request('dsh-app://app/dsh1024/status'))
+    expect(headersSentAfterSet).toBe(false)
+    expect(status?.status).toBe(418)
+    expect(await status?.text()).toBe('teapot')
+
+    const noContent = await server.fetchNamed(new Request('dsh-app://app/dsh1024/no-content'))
+    expect(noContent?.status).toBe(204)
+    expect(noContent?.body).toBeNull()
+
+    const streamed = await server.fetchNamed(new Request('dsh-app://app/dsh1024/stream'))
+    const reader = streamed!.body!.getReader()
+    const decoder = new TextDecoder()
+    try {
+      expect(initialWriteAccepted).toBe(false)
+      expect(drainCount).toBe(0)
+      expect(decoder.decode((await reader.read()).value)).toBe('first')
+      await Promise.resolve()
+      expect(drainCount).toBe(1)
+      writeStream('second')
+      expect(decoder.decode((await reader.read()).value)).toBe('second')
+      await Promise.resolve()
+      expect(drainCount).toBe(1)
+      endStream('third')
+      expect(decoder.decode((await reader.read()).value)).toBe('third')
+      expect(await reader.read()).toEqual({ done: true, value: undefined })
+    } finally {
+      destroyStream()
+    }
+
+    const cancellable = await server.fetchNamed(new Request('dsh-app://app/dsh1024/cancel'))
+    await cancellable!.body!.cancel()
+    expect(cancelled).toBe(true)
 
     expect(await server.fetchNamed(new Request('dsh-app://app/index.html'))).toBeUndefined()
   })

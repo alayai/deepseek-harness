@@ -83,7 +83,15 @@ const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
 const DESKTOP_PROFILE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] as const
-const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\nstrictDepBuilds: true\nignoreWorkspaceRootCheck: true\n'
+const WORKSPACE_SETTINGS = [
+  'nodeLinker: hoisted',
+  'autoInstallPeers: false',
+  'strictDepBuilds: true',
+  'ignoreWorkspaceRootCheck: true',
+  // Profile installs may pin freshly published @deepseek-ai peers from third-party
+  // plugins; the monorepo age gate must not block Desktop recovery.
+  'minimumReleaseAge: 0',
+].join('\n') + '\n'
 const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*|[a-z0-9][a-z0-9._~-]*)$/u
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/u
 const MAX_PNPM_DIAGNOSTIC_BYTES = 64 * 1024
@@ -360,10 +368,6 @@ function pluginsAreInstalled(projectDir: string): boolean {
   return declaredPluginNames(projectDir).every(name => existsSync(pluginManifestPath(projectDir, name)))
 }
 
-function pluginRecords(projectDir: string): readonly DesktopPluginRecord[] {
-  return declaredPluginNames(projectDir).map(name => inspectPlugin(projectDir, name))
-}
-
 function listablePluginRecords(projectDir: string): readonly DesktopPluginRecord[] {
   const records: DesktopPluginRecord[] = []
   for (const name of declaredPluginNames(projectDir)) {
@@ -374,6 +378,11 @@ function listablePluginRecords(projectDir: string): readonly DesktopPluginRecord
     }
   }
   return records
+}
+
+/** Installed plugin inventory; skips packages whose on-disk manifests are missing. */
+function pluginRecords(projectDir: string): readonly DesktopPluginRecord[] {
+  return listablePluginRecords(projectDir)
 }
 
 function writeProfilePlugins(projectDir: string, plugins: readonly DesktopPluginRecord[]): void {
@@ -559,6 +568,7 @@ export class DesktopProjectManager {
 
   private async reconcileProfile(projectDir: string, previous: DesktopProfileState | undefined, packagesChanged = false): Promise<void> {
     const target = this.currentRuntime()
+    writeFileSync(join(projectDir, 'pnpm-workspace.yaml'), workspaceFile(), { mode: 0o600 })
     const declared = declaredPluginNames(projectDir)
     const missingPlugins = declared.some(name => !existsSync(pluginManifestPath(projectDir, name)))
     const rebuild = (!packagesChanged && existsSync(this.pendingPackages))
@@ -569,7 +579,14 @@ export class DesktopProjectManager {
       writeFileSync(this.pendingPackages, '')
       if (this.runtime.profileResolution !== 'runtime') unlinkDesktopHostPackages(projectDir)
       removeOwnedDirectory(join(projectDir, 'node_modules'))
-      await this.runPnpm(projectDir, ['install', '--frozen-lockfile', '--ignore-scripts'])
+      try {
+        await this.runPnpm(projectDir, ['install', '--frozen-lockfile', '--ignore-scripts'])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // Owned workspace settings can drift from an older lockfile after Desktop upgrades.
+        if (!/ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|ERR_PNPM_OUTDATED_LOCKFILE/u.test(message)) throw error
+        await this.runPnpm(projectDir, ['install', '--ignore-scripts'])
+      }
     }
     if (rebuild || packagesChanged) await this.finishPackageOperation(projectDir)
     else this.prepareProfile(projectDir)
@@ -606,6 +623,12 @@ export class DesktopProjectManager {
         }
         const previousSpec = projectManifest(projectDir).dependencies[requestedName]
         await this.runPnpm(projectDir, ['add', addSpec, '--save-exact', '--ignore-scripts'])
+        // A pnpm transaction can finish with the virtual store populated while
+        // a stale or interrupted hoisted link is still absent. Rebuild the
+        // profile before reading the package metadata used to activate it.
+        if (!existsSync(pluginManifestPath(projectDir, requestedName))) {
+          await this.rebuildProfilePackages(projectDir)
+        }
         if (vendoredSpec !== undefined) {
           setDependencySpec(projectDir, requestedName, vendoredSpec)
           if (previousSpec !== undefined && previousSpec !== vendoredSpec) {
@@ -642,6 +665,9 @@ export class DesktopProjectManager {
           throw new Error('desktop project: tarball plugins are updated by installing a new tarball')
         }
         await this.runPnpm(projectDir, ['add', `${mutation.name}@${mutation.version}`, '--save-exact', '--ignore-scripts'])
+        if (!existsSync(pluginManifestPath(projectDir, mutation.name))) {
+          await this.rebuildProfilePackages(projectDir)
+        }
         {
           const installed = inspectPlugin(projectDir, mutation.name)
           writeProfilePlugins(
@@ -662,6 +688,11 @@ export class DesktopProjectManager {
       default:
         mutation satisfies never
     }
+  }
+
+  private async rebuildProfilePackages(projectDir: string): Promise<void> {
+    removeOwnedDirectory(join(projectDir, 'node_modules'))
+    await this.runPnpm(projectDir, ['install', '--ignore-scripts'])
   }
 
   private async runPnpm(projectDir: string, args: readonly string[]): Promise<void> {
@@ -686,6 +717,7 @@ export class DesktopProjectManager {
         `--config.userconfig=${npmrc}`,
         '--config.ignore-workspace-root-check=true',
         '--config.auto-install-peers=false',
+        '--config.minimum-release-age=0',
         command,
         ...commandArgs,
       ], {
