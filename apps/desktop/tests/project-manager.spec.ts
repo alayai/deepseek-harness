@@ -16,7 +16,7 @@ function temporaryRoot(): string {
   roots.push(root)
   return root
 }
-function writeFakePnpm(root: string, options: { omitAddedPackage?: boolean } = {}): string {
+function writeFakePnpm(root: string): string {
   const path = join(root, 'pnpm.mjs')
   writeFileSync(path, `
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -24,7 +24,6 @@ import { join } from 'node:path'
 const args = process.argv.slice(2)
 const project = process.cwd()
 const command = args.find(value => ['install', 'add', 'remove', 'rebuild'].includes(value))
-const added = command === 'add' ? args[args.indexOf(command) + 1]?.replace(/@[^@]*$/u, '') : undefined
 appendFileSync(${JSON.stringify(join(root, 'pnpm-log.jsonl'))}, JSON.stringify({args, registry: process.env.NPM_CONFIG_REGISTRY}) + '\\n')
 if (command !== 'rebuild') {
   const manifestPath = join(project, 'package.json')
@@ -40,7 +39,6 @@ if (command !== 'rebuild') {
   writeFileSync(manifestPath, JSON.stringify(manifest))
   rmSync(join(project, 'node_modules'), { recursive: true, force: true })
   for (const [name, spec] of Object.entries(manifest.dependencies)) {
-    if (${JSON.stringify(options.omitAddedPackage)} && command === 'add' && name === added) continue
     const packageRoot = join(project, 'node_modules', name)
     mkdirSync(packageRoot, { recursive: true })
     const version = spec.startsWith('file:') ? '1.0.0' : spec
@@ -60,7 +58,9 @@ function setup(): { root: string; manager: DesktopProjectManager } {
   const root = temporaryRoot()
   const dsh = join(root, 'resources', 'dsh')
   runtimeFixture(dsh)
-  return { root, manager: new DesktopProjectManager(resolveDesktopPaths(join(root, '.dsh')), { node: process.execPath, pnpm: writeFakePnpm(root), dsh }) }
+  return { root, manager: new DesktopProjectManager(resolveDesktopPaths(join(root, '.dsh')), {
+    node: process.execPath, pnpmNode: process.execPath, pnpm: writeFakePnpm(root), dsh,
+  }) }
 }
 function calls(root: string): { args: string[]; registry: string }[] {
   const path = join(root, 'pnpm-log.jsonl')
@@ -259,21 +259,6 @@ describe('desktop external plugin profile', () => {
     expect(manager.listPlugins()).toEqual([{ name: 'plugin', version: '1.0.0', enabled: true }])
   })
 
-  it('repairs a missing hoisted link before inspecting an added plugin', async () => {
-    const root = temporaryRoot()
-    const dsh = join(root, 'resources', 'dsh')
-    runtimeFixture(dsh)
-    const manager = new DesktopProjectManager(resolveDesktopPaths(join(root, '.dsh')), {
-      node: process.execPath, pnpm: writeFakePnpm(root, { omitAddedPackage: true }), dsh,
-    })
-    await manager.applyRelease()
-    await manager.mutate({ type: 'plugin-add', spec: 'plugin@1.0.0' }, hooks())
-    expect(manager.listPlugins()).toEqual([{ name: 'plugin', version: '1.0.0', enabled: true }])
-    expect(calls(root).map(call => call.args.find(arg => ['add', 'install', 'rebuild'].includes(arg)))).toEqual([
-      'add', 'install', 'rebuild',
-    ])
-  })
-
   it('preserves unknown files when initializing a profile', async () => {
     const { manager } = setup()
     mkdirSync(manager.paths.profile, { recursive: true })
@@ -361,6 +346,17 @@ describe('desktop external plugin profile', () => {
     await expect(manager.mutate({ type: 'plugin-add', spec: '@deepseek-ai/cordis' }, hooks())).rejects.toThrow(/host-owned/u)
     await expect(manager.applyRelease()).resolves.toBe(false)
     expect(calls(root)).toHaveLength(2)
+  })
+
+  it('runs pnpm with the package Node instead of the Host executable', async () => {
+    const { root, manager } = setup()
+    const packageManager = new DesktopProjectManager(manager.paths, {
+      ...manager.runtime,
+      node: join(root, 'host-only.exe'),
+    })
+    await packageManager.applyRelease()
+    await packageManager.mutate({ type: 'plugin-add', spec: 'plugin@1.0.0' }, hooks())
+    expect(packageManager.listPlugins()).toEqual([{ name: 'plugin', version: '1.0.0', enabled: true }])
   })
 
   it('retains disabled plugin versions through updates and enables them explicitly', async () => {

@@ -63,6 +63,7 @@ const MIME: Readonly<Record<string, string>> = {
 
 interface RuntimeResources {
   readonly node: string
+  readonly pnpmNode: string
   readonly pnpm: string
   readonly dsh: string
   readonly profileResolution?: 'runtime'
@@ -70,15 +71,16 @@ interface RuntimeResources {
 
 function runtimeResources(): RuntimeResources {
   const development = !app.isPackaged
+  const pnpmNode = (development ? process.env.DSH_DESKTOP_NODE_BINARY : undefined)
+    ?? join(process.resourcesPath, 'runtime', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const node = development
-    ? process.env.DSH_DESKTOP_NODE_BINARY
-      ?? join(process.resourcesPath, 'runtime', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
+    ? pnpmNode
     : process.execPath
   const pnpm = (development ? process.env.DSH_DESKTOP_PNPM_ENTRY : undefined)
     ?? join(process.resourcesPath, 'runtime', 'pnpm', 'bin', 'pnpm.mjs')
   const dsh = (development ? process.env.DSH_DESKTOP_DSH_DIR : undefined)
     ?? (development ? join(process.resourcesPath, 'dsh') : join(app.getAppPath(), 'dsh'))
-  return { node, pnpm, dsh, ...(development ? {} : { profileResolution: 'runtime' }) }
+  return { node, pnpmNode, pnpm, dsh, ...(development ? {} : { profileResolution: 'runtime' }) }
 }
 
 function developmentHostInspectPort(enabled: boolean): number | undefined {

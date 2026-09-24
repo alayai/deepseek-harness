@@ -305,7 +305,11 @@ describe('desktop main startup', () => {
       runtime: join(harness.app.getAppPath(), 'dsh'),
       profile: 'desktop-test-profile',
     })
-    expect(harness.managerRuntimes[0]).toMatchObject({ profileResolution: 'runtime' })
+    expect(harness.managerRuntimes[0]).toMatchObject({
+      node: process.execPath,
+      pnpmNode: join('desktop-test-resources', 'runtime', 'node', process.platform === 'win32' ? 'node.exe' : 'node'),
+      profileResolution: 'runtime',
+    })
     expect(harness.hosts[0]!.start).toHaveBeenCalledTimes(1)
     expect(harness.windows).toHaveLength(1)
     expect(window.urls).toEqual(['dsh-app://shell/startup.html', 'dsh-app://app/index.html'])

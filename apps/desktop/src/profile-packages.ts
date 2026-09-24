@@ -168,6 +168,29 @@ interface PackageManifest {
   readonly optionalDependencies: Readonly<Record<string, string>>
   readonly peerDependencies: Readonly<Record<string, string>>
   readonly optionalPeers: ReadonlySet<string>
+  readonly clientPeers: ReadonlySet<string>
+}
+
+// The Web shell supplies these package roots through its static module table,
+// so a dual-face plugin does not install them into the Node profile.
+const CLIENT_PLATFORM_PEERS = new Set([
+  'react',
+  'react-dom',
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
+])
+
+function packageSpecifierRoot(specifier: string): string | undefined {
+  if (specifier.startsWith('@')) {
+    const parts = specifier.split('/')
+    const root = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : ''
+    return PACKAGE_NAME.test(root) ? root : undefined
+  }
+  const [root] = specifier.split('/')
+  return root !== undefined && PACKAGE_NAME.test(root) ? root : undefined
 }
 
 function manifest(path: string): PackageManifest {
@@ -189,8 +212,28 @@ function manifest(path: string): PackageManifest {
       if (record(meta) && meta.optional === true) optionalPeers.add(name)
     }
   }
+  const peerDependencies = dependencies('peerDependencies')
+  const clientPeers = new Set<string>()
+  const dsh = record(value.dsh) ? value.dsh : undefined
+  const client = dsh !== undefined && record(dsh.client) ? dsh.client : undefined
+  if (client?.platform === 'web') {
+    for (const name of Object.keys(peerDependencies)) {
+      if (CLIENT_PLATFORM_PEERS.has(name)) clientPeers.add(name)
+    }
+    for (const field of ['inject', 'external'] as const) {
+      const entries = client[field]
+      if (entries === undefined) continue
+      if (!Array.isArray(entries) || entries.some(entry => typeof entry !== 'string')) {
+        throw new Error(`desktop profile: invalid dsh.client.${field} in ${path}`)
+      }
+      for (const entry of entries as string[]) {
+        const name = packageSpecifierRoot(entry)
+        if (name !== undefined && name in peerDependencies) clientPeers.add(name)
+      }
+    }
+  }
   return { name: value.name, version: value.version, dependencies: dependencies('dependencies'),
-    optionalDependencies: dependencies('optionalDependencies'), peerDependencies: dependencies('peerDependencies'), optionalPeers }
+    optionalDependencies: dependencies('optionalDependencies'), peerDependencies, optionalPeers, clientPeers }
 }
 
 function resolvedPackage(anchor: string, name: string): string | undefined {
@@ -301,7 +344,7 @@ export function validateDesktopPluginGraph(
       }
       const target = packageFrom(path, name, profileRoot)
       if (target === undefined) {
-        if (optional) continue
+        if (optional || (peer && info.clientPeers.has(name))) continue
         if (resolvedPackage(path, name) !== undefined) {
           throw new Error(`desktop profile: ${chain} resolves ${name} outside its owned packages`)
         }

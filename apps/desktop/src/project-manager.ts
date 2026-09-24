@@ -56,7 +56,10 @@ interface DesktopProjectManifest {
 
 /** Exact executables the desktop shell bundles. */
 export interface DesktopRuntimeExecutables {
+  /** Node-compatible executable used by the Host; packaged builds use Electron for ASAR access. */
   readonly node: string
+  /** Bundled upstream Node.js executable used by pnpm and package lifecycle scripts. */
+  readonly pnpmNode: string
   readonly pnpm: string
   readonly dsh: string
   /** How the Host obtains release-owned packages outside the writable profile. */
@@ -489,7 +492,8 @@ export class DesktopProjectManager {
 
   /** @returns Whether application resources support profile recovery. */
   canRecoverProfile(): boolean {
-    return this.descriptor !== undefined && existsSync(this.runtime.node) && existsSync(this.runtime.dsh)
+    return this.descriptor !== undefined && existsSync(this.runtime.node) && existsSync(this.runtime.pnpmNode)
+      && existsSync(this.runtime.pnpm) && existsSync(this.runtime.dsh)
   }
 
   private get pendingPackages(): string { return join(this.paths.profile, 'desktop-packages-pending') }
@@ -623,12 +627,6 @@ export class DesktopProjectManager {
         }
         const previousSpec = projectManifest(projectDir).dependencies[requestedName]
         await this.runPnpm(projectDir, ['add', addSpec, '--save-exact', '--ignore-scripts'])
-        // A pnpm transaction can finish with the virtual store populated while
-        // a stale or interrupted hoisted link is still absent. Rebuild the
-        // profile before reading the package metadata used to activate it.
-        if (!existsSync(pluginManifestPath(projectDir, requestedName))) {
-          await this.rebuildProfilePackages(projectDir)
-        }
         if (vendoredSpec !== undefined) {
           setDependencySpec(projectDir, requestedName, vendoredSpec)
           if (previousSpec !== undefined && previousSpec !== vendoredSpec) {
@@ -665,9 +663,6 @@ export class DesktopProjectManager {
           throw new Error('desktop project: tarball plugins are updated by installing a new tarball')
         }
         await this.runPnpm(projectDir, ['add', `${mutation.name}@${mutation.version}`, '--save-exact', '--ignore-scripts'])
-        if (!existsSync(pluginManifestPath(projectDir, mutation.name))) {
-          await this.rebuildProfilePackages(projectDir)
-        }
         {
           const installed = inspectPlugin(projectDir, mutation.name)
           writeProfilePlugins(
@@ -690,11 +685,6 @@ export class DesktopProjectManager {
     }
   }
 
-  private async rebuildProfilePackages(projectDir: string): Promise<void> {
-    removeOwnedDirectory(join(projectDir, 'node_modules'))
-    await this.runPnpm(projectDir, ['install', '--ignore-scripts'])
-  }
-
   private async runPnpm(projectDir: string, args: readonly string[]): Promise<void> {
     const [command, ...commandArgs] = args
     if (command === undefined) throw new Error('desktop project: pnpm command is required')
@@ -709,7 +699,7 @@ export class DesktopProjectManager {
     )))
     writeFileSync(this.pendingPackages, '')
     await new Promise<void>((settle, reject) => {
-      const child = spawn(this.runtime.node, [
+      const child = spawn(this.runtime.pnpmNode, [
         this.runtime.pnpm,
         `--config.registry=${DESKTOP_REGISTRY}`,
         `--config.store-dir=${this.paths.pnpm.store}`,
@@ -728,7 +718,7 @@ export class DesktopProjectManager {
           NPM_CONFIG_REGISTRY: DESKTOP_REGISTRY,
           NPM_CONFIG_STORE_DIR: this.paths.pnpm.store,
           NPM_CONFIG_USERCONFIG: npmrc,
-          PATH: `${dirname(this.runtime.node)}${delimiter}${process.env.PATH ?? ''}`,
+          PATH: `${dirname(this.runtime.pnpmNode)}${delimiter}${process.env.PATH ?? ''}`,
           PNPM_HOME: this.paths.pnpm.home,
           XDG_CACHE_HOME: this.paths.pnpm.cache,
           XDG_CONFIG_HOME: this.paths.pnpm.config,

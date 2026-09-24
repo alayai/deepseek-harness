@@ -12,24 +12,14 @@ import {
   unlinkDesktopHostPackages,
   validateDesktopPluginGraph,
 } from '../src/profile-packages.ts'
-import { writeDesktopRuntime } from '../src/runtime-tree.ts'
 import { runtimeFixture, writePackage } from './runtime-fixture.ts'
 
 const roots: string[] = []
-function fixture(additionalShared: Readonly<Record<string, string>> = {}) {
+function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'desktop-profile-'))
   roots.push(root)
   const dsh = join(root, 'dsh')
-  let runtime = runtimeFixture(dsh)
-  for (const [name, version] of Object.entries(additionalShared)) {
-    writePackage(join(dsh, 'node_modules'), name, { version })
-  }
-  if (Object.keys(additionalShared).length > 0) {
-    runtime = writeDesktopRuntime(dsh, runtime.release, [
-      ...runtime.sharedPackages.map(entry => entry.name),
-      ...Object.keys(additionalShared),
-    ])
-  }
+  const runtime = runtimeFixture(dsh)
   const profile = join(root, 'profile')
   createPluginProfile(profile)
   linkDesktopHostPackages(profile, dsh, runtime)
@@ -86,12 +76,10 @@ it('rejects an incompatible host package version from either dependency field', 
   writePackage(join(profile, 'node_modules'), 'plugin', { dependencies: { '@deepseek-ai/cordis': '^2.0.0' } })
   expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).toThrow(/found 1.0.0/u)
 })
-it('accepts client-only peers supplied by the host graph', () => {
-  const { dsh, runtime, profile } = fixture({
-    '@deepseek-ai/dsh-client-runtime': '1.0.0',
-    react: '19.0.0',
-  })
+it('does not require browser peers in the Node host graph', () => {
+  const { dsh, runtime, profile } = fixture()
   writePackage(join(profile, 'node_modules'), 'plugin', {
+    dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-runtime'] } },
     peerDependencies: {
       '@deepseek-ai/cordis': '^1.0.0',
       '@deepseek-ai/dsh-client-runtime': '>=0.1.0-rc.1',
@@ -99,6 +87,19 @@ it('accepts client-only peers supplied by the host graph', () => {
     },
   })
   expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) }).not.toThrow()
+})
+it('still requires undeclared Host peers from a plugin with a browser entry', () => {
+  const { dsh, runtime, profile } = fixture()
+  writePackage(join(profile, 'node_modules'), 'plugin', {
+    dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-runtime'] } },
+    peerDependencies: {
+      '@deepseek-ai/cordis': '^1.0.0',
+      '@deepseek-ai/dsh-client-runtime': '>=0.1.0-rc.1',
+      missing: '^1.0.0',
+    },
+  })
+  expect(() => { validateDesktopPluginGraph(profile, dsh, runtime, ['plugin']) })
+    .toThrow(/requires missing missing@\^1\.0\.0/u)
 })
 it('rejects a missing required peer and permits a missing optional peer', () => {
   const { dsh, runtime, profile } = fixture()
