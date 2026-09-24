@@ -13,14 +13,16 @@ const harness = await vi.hoisted(async () => {
   const windows: FakeWindow[] = []
   const hosts: FakeHost[] = []
   const managerRuntimes: unknown[] = []
-  const handlers = new Map<string, (event: { senderFrame: { url: string } }) => unknown>()
+  const handlers = new Map<string, (event: { senderFrame: { url: string } }, ...args: unknown[]) => unknown>()
   let pluginsEnabled = false
   let preparing = deferred()
   let prepared = deferred()
   let hostStarted = deferred()
   let navigated = deferred()
+  let applicationNavigation = deferred()
   let errorPublished = deferred()
   let quitCompleted = deferred()
+  let blockApplicationNavigation = false
   class FakeWindow extends EventEmitter {
     destroyed = false
     readonly urls: string[] = []
@@ -40,7 +42,10 @@ const harness = await vi.hoisted(async () => {
     isMinimized() { return false }
     async loadURL(url: string) {
       this.urls.push(url)
-      if (url === 'dsh-app://app/index.html') navigated.resolve()
+      if (url === 'dsh-app://app/index.html') {
+        if (blockApplicationNavigation) await applicationNavigation.promise
+        navigated.resolve()
+      }
     }
     static getAllWindows() { return windows.filter(window => !window.destroyed) }
     close() { this.destroyed = true; this.emit('closed') }
@@ -81,6 +86,8 @@ const harness = await vi.hoisted(async () => {
     canRecoverProfile: vi.fn(() => true),
     get preparing() { return preparing }, get prepared() { return prepared },
     get hostStarted() { return hostStarted }, get navigated() { return navigated },
+    get applicationNavigation() { return applicationNavigation },
+    set blockApplicationNavigation(value: boolean) { blockApplicationNavigation = value },
     get errorPublished() { return errorPublished }, get quitCompleted() { return quitCompleted },
     nextHostStart() { hostStarted = deferred(); return hostStarted.promise },
     get pluginsEnabled() { return pluginsEnabled },
@@ -90,7 +97,8 @@ const harness = await vi.hoisted(async () => {
       app.isPackaged = true
       pluginsEnabled = false
       preparing = deferred(); prepared = deferred(); hostStarted = deferred()
-      navigated = deferred(); errorPublished = deferred(); quitCompleted = deferred()
+      navigated = deferred(); applicationNavigation = deferred(); errorPublished = deferred(); quitCompleted = deferred()
+      blockApplicationNavigation = false
     },
   }
 })
@@ -100,7 +108,10 @@ vi.mock('electron', () => ({
   BrowserWindow: harness.FakeWindow,
   dialog: harness.dialog,
   ipcMain: {
-    handle: (channel: string, handler: (event: { senderFrame: { url: string } }) => unknown) => { harness.handlers.set(channel, handler) },
+    handle: (
+      channel: string,
+      handler: (event: { senderFrame: { url: string } }, ...args: unknown[]) => unknown,
+    ) => { harness.handlers.set(channel, handler) },
   },
   Menu: { setApplicationMenu: vi.fn(), buildFromTemplate: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
@@ -125,10 +136,10 @@ vi.mock('../src/project-manager.ts', () => ({
 vi.mock('../src/host-process.ts', () => ({ DesktopHostProcess: harness.FakeHost }))
 vi.mock('../src/update-coordinator.ts', () => ({ DesktopUpdateCoordinator: vi.fn() }))
 
-function invoke(channel: string): unknown {
+function invoke(channel: string, ...args: unknown[]): unknown {
   const handler = harness.handlers.get(channel)
   if (handler === undefined) throw new Error(`missing handler ${channel}`)
-  return handler({ senderFrame: { url: 'dsh-app://shell/startup.html' } })
+  return handler({ senderFrame: { url: 'dsh-app://shell/startup.html' } }, ...args)
 }
 
 beforeEach(() => {
@@ -265,6 +276,27 @@ describe('desktop main startup', () => {
     await recovery
     expect(harness.windows).toHaveLength(1)
     expect(invoke(DESKTOP_IPC.backendStatus)).toEqual({ phase: 'ready' })
+  })
+
+  it('completes plugin IPC before a slow primary-window navigation finishes', async () => {
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    harness.prepared.resolve()
+    await harness.hostStarted.promise
+    harness.hosts[0]!.ready.resolve()
+    await harness.navigated.promise
+
+    harness.blockApplicationNavigation = true
+    const nextStarted = harness.nextHostStart()
+    const add = Promise.resolve(invoke(DESKTOP_IPC.pluginsAdd, 'plugin@1.0.0'))
+    await harness.hosts[0]!.stopping.promise
+    harness.hosts[0]!.exited.resolve()
+    await nextStarted
+    harness.hosts[1]!.ready.resolve()
+
+    await expect(add).resolves.toBeUndefined()
+    harness.applicationNavigation.resolve()
+    await harness.navigated.promise
   })
 
   it('waits for Host exit before relaunching the application', async () => {

@@ -318,7 +318,13 @@ async function main(): Promise<void> {
     await navigateMain(startupUrl)
     try {
       await manager.mutate(mutation, hooks)
-      await navigateMain(applicationUrl)
+      // The package transaction is complete once the profile and backend are
+      // ready. Do not hold the plugin-manager IPC response on a potentially
+      // slow application document navigation; the manager can refresh its
+      // inventory immediately while the primary window finishes loading.
+      void navigateMain(applicationUrl).catch((error: unknown) => {
+        void showStartupError(error).catch((failure: unknown) => { console.error(failure) })
+      })
     } catch (error) {
       await showStartupError(error)
       throw error

@@ -37,6 +37,8 @@ packages/**/__pycache__/
 apps/web/dist/
 .artifacts/
 .dsh-build/
+.dsh-build-trash/
+.tmp-pnpm/
 .playwright-mcp/
 .orig
 .worktrees/

@@ -4,7 +4,7 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "npm@10.9.4",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },

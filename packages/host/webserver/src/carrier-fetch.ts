@@ -52,12 +52,21 @@ export async function fetchFromHttpHandler(
   handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>,
 ): Promise<Response> {
   const url = new URL(request.url)
-  const headers = incomingHeaders(request, url.host)
+  // Desktop's custom protocol is an in-process, loopback-equivalent carrier.
+  // Give route guards the same socket and Host facts they receive from a
+  // local HTTP request; browser Origin markers cannot describe this carrier.
+  const desktopCarrier = url.protocol === 'dsh-app:'
+  const headers = incomingHeaders(request, desktopCarrier ? '127.0.0.1' : url.host)
+  if (desktopCarrier) {
+    delete headers.origin
+    delete headers['sec-fetch-site']
+  }
   const body = request.body
   const req = {
     url: `${url.pathname}${url.search}`,
     method: request.method,
     headers,
+    ...(desktopCarrier ? { socket: { remoteAddress: '127.0.0.1' } } : {}),
     destroy(): void { void body?.cancel() },
     async *[Symbol.asyncIterator](): AsyncGenerator<Buffer> {
       if (body === null) return
@@ -74,8 +83,10 @@ export async function fetchFromHttpHandler(
   let terminal = false
   let streamFinished = false
   let needsDrain = false
-  const listeners = new Map<string, Set<() => void>>()
-  const onceListeners = new Map<string, Map<() => void, () => void>>()
+  // Static plugin handlers commonly use Readable.pipe(res), which relies on
+  // the response's EventEmitter lifecycle in addition to write/end.
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>()
+  const onceListeners = new Map<string, Map<(...args: unknown[]) => void, (...args: unknown[]) => void>>()
   let resolveResponse!: (response: Response) => void
   let rejectResponse!: (error: unknown) => void
   const done = new Promise<Response>((resolve, reject) => {
@@ -100,8 +111,17 @@ export async function fetchFromHttpHandler(
     },
   })
 
-  const emit = (event: string): void => {
-    for (const callback of [...(listeners.get(event) ?? [])]) callback()
+  const emit = (event: string, ...args: unknown[]): boolean => {
+    const callbacks = [...(listeners.get(event) ?? [])]
+    for (const callback of callbacks) callback(...args)
+    return callbacks.length > 0
+  }
+
+  const removeListener = (event: string, callback: (...args: unknown[]) => void): void => {
+    listeners.get(event)?.delete(callback)
+    const wrapped = onceListeners.get(event)?.get(callback)
+    if (wrapped !== undefined) listeners.get(event)?.delete(wrapped)
+    onceListeners.get(event)?.delete(callback)
   }
 
   const finishStream = (error?: unknown): void => {
@@ -134,6 +154,7 @@ export async function fetchFromHttpHandler(
     }
     terminal = true
     finishStream(error)
+    if (writableEnded) emit('finish')
     emit('close')
   }
 
@@ -178,32 +199,48 @@ export async function fetchFromHttpHandler(
       complete(error ?? new Error(`webserver: carrier response destroyed for ${request.method} ${url.pathname}`))
       return res
     },
-    on(event: string, callback: () => void): unknown {
-      const set = listeners.get(event) ?? new Set<() => void>()
+    on(event: string, callback: (...args: unknown[]) => void): unknown {
+      const set = listeners.get(event) ?? new Set<(...args: unknown[]) => void>()
       set.add(callback)
       listeners.set(event, set)
       return res
     },
-    once(event: string, callback: () => void): unknown {
-      const wrapped = (): void => {
+    prependListener(event: string, callback: (...args: unknown[]) => void): unknown {
+      const set = listeners.get(event) ?? new Set<(...args: unknown[]) => void>()
+      const existing = [...set]
+      set.clear()
+      set.add(callback)
+      for (const current of existing) set.add(current)
+      listeners.set(event, set)
+      return res
+    },
+    once(event: string, callback: (...args: unknown[]) => void): unknown {
+      const wrapped = (...args: unknown[]): void => {
         listeners.get(event)?.delete(wrapped)
         onceListeners.get(event)?.delete(callback)
-        callback()
+        callback(...args)
       }
-      const wrappers = onceListeners.get(event) ?? new Map<() => void, () => void>()
+      const wrappers = onceListeners.get(event) ?? new Map<(...args: unknown[]) => void, (...args: unknown[]) => void>()
       wrappers.set(callback, wrapped)
       onceListeners.set(event, wrappers)
-      const set = listeners.get(event) ?? new Set<() => void>()
+      const set = listeners.get(event) ?? new Set<(...args: unknown[]) => void>()
       set.add(wrapped)
       listeners.set(event, set)
       return res
     },
-    off(event: string, callback: () => void): unknown {
-      listeners.get(event)?.delete(callback)
-      const wrapped = onceListeners.get(event)?.get(callback)
-      if (wrapped !== undefined) listeners.get(event)?.delete(wrapped)
-      onceListeners.get(event)?.delete(callback)
+    removeListener(event: string, callback: (...args: unknown[]) => void): unknown {
+      removeListener(event, callback)
       return res
+    },
+    off(event: string, callback: (...args: unknown[]) => void): unknown {
+      removeListener(event, callback)
+      return res
+    },
+    listenerCount(event: string): number {
+      return listeners.get(event)?.size ?? 0
+    },
+    emit(event: string, ...args: unknown[]): boolean {
+      return emit(event, ...args)
     },
   }
   Object.defineProperty(res, 'statusCode', {

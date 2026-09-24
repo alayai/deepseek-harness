@@ -56,7 +56,7 @@ export function createElectronBuilderConfig(
   return {
     appId,
     productName: 'DeepSeek Harness',
-    artifactName: 'deepseek-harness-${version}-${os}-${arch}.${ext}',
+    artifactName: 'coco-lite-v${version}-${os}-${arch}.${ext}',
     directories: {
       output: unsigned ? join(buildPaths.root, 'unsigned-artifacts') : buildPaths.artifacts,
       buildResources: fileURLToPath(new URL('./build', import.meta.url)),

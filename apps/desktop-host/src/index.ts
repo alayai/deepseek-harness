@@ -358,16 +358,16 @@ export async function runDesktopHost(
         }
         const request = new Request(url, init)
         const pathname = url.pathname
-        // Named plugin routes (/dsh1024/icon, …) live on webServer. Desktop
-        // never listens; fetchNamed answers them without a TCP socket.
-        const pluginResponse = pathname === DESKTOP_STREAM_PATH || pathname.startsWith('/api/') || pathname.startsWith('/plugins/')
+        // Named plugin routes, including plugin-owned /api/* endpoints, live
+        // on webServer. Desktop never listens; fetchNamed answers them over
+        // the in-process carrier before the core API fallback is considered.
+        const pluginResponse = pathname === DESKTOP_STREAM_PATH || pathname.startsWith('/plugins/')
           ? undefined
           : await webServer.fetchNamed(request)
         const response = pathname === DESKTOP_STREAM_PATH
           ? await streams.fetch(request)
-          : pathname.startsWith('/api/')
-            ? await api.fetch(request)
-            : pluginResponse ?? await assets.fetch(request)
+          : pluginResponse
+            ?? (pathname.startsWith('/api/') ? await api.fetch(request) : await assets.fetch(request))
         await writeResponse(encodeDesktopResponseStart(command.streamId, {
           status: response.status,
           headers: [...response.headers.entries()],

@@ -9,6 +9,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
+import { Readable } from 'node:stream'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -451,8 +452,17 @@ describe('real Loader composition', () => {
           method: req.method,
           url: req.url,
           host: req.headers.host,
+          remoteAddress: req.socket.remoteAddress,
           body: Buffer.concat(chunks).toString('utf8'),
         }))
+      },
+    })
+    server.register({
+      kind: 'exact',
+      path: '/dsh1024/piped',
+      handler: (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        Readable.from([Buffer.from('piped')]).pipe(res)
       },
     })
 
@@ -471,9 +481,14 @@ describe('real Loader composition', () => {
     expect(await echoed!.json()).toEqual({
       method: 'POST',
       url: '/dsh1024/echo?revalidate=1',
-      host: 'app',
+      host: '127.0.0.1',
+      remoteAddress: '127.0.0.1',
       body: '{"ok":true}',
     })
+
+    const piped = await server.fetchNamed(new Request('dsh-app://app/dsh1024/piped'))
+    expect(piped?.status).toBe(200)
+    expect(await piped?.text()).toBe('piped')
 
     const status = await server.fetchNamed(new Request('dsh-app://app/dsh1024/status'))
     expect(headersSentAfterSet).toBe(false)
