@@ -6,15 +6,17 @@ English | [中文](2026-09-24-desktop-plugin-api-routes.zh.md)
 
 ## Problem
 
-The Desktop Host forwards renderer requests through a framed `dsh-app://` carrier instead of a listening HTTP server. Its dispatcher sent every `/api/*` request directly to the core Connection handler, so a plugin route registered on `ctx.webServer` under `/api/<plugin>` was never considered. The Client half could render its panel, but its first data request returned HTTP 404.
+The Desktop Host forwards renderer requests through a framed `dsh-app://` carrier instead of a listening HTTP server. Its dispatcher originally sent every `/api/*` request directly to the core Connection handler, so a plugin route registered on `ctx.webServer` under `/api/<plugin>` was never considered. The first route-order fix sent `/api/*` through WebServer first, but that also hit the browser-authenticated core `/api` prefix and returned 401 for every Desktop RPC, so history and workspace data appeared empty.
 
 ## Decision
 
-Desktop dispatches every request through `webServer.fetchNamed()` before falling back to the core `/api` handler. Asset bundle paths and the internal remote stream keep their dedicated handlers. The HTTP carrier represents `dsh-app://` named-route requests as an in-process loopback: it supplies a loopback Host and socket address and removes browser Origin markers that have no meaning across the pipe. This lets loopback-protected plugin routes accept Desktop requests without weakening network access rules.
+Desktop dispatches the core `/api` handler first, bypassing the browser-only authentication fence. Only a core 404 falls through to `webServer.fetchNamed()` for a plugin-owned `/api/*` route. Other named routes still use WebServer before static assets, and asset bundle paths plus the internal remote stream keep their dedicated handlers. The HTTP carrier represents `dsh-app://` named-route requests as an in-process loopback: it supplies a loopback Host and socket address and removes browser Origin markers that have no meaning across the pipe. This keeps plugin routes reachable without routing core RPCs through browser authentication.
 
 ## Alternatives considered
 
 **Keep `/api/*` exclusive to Connection.** This preserves the old dispatch shortcut but makes any plugin-owned API route unreachable in Desktop, even though the same route works in the listening Web composition.
+
+**Always dispatch WebServer first.** Rejected because the core Connection prefix is itself a WebServer route and requires browser authentication; an internal `dsh-app://` request must bypass that fence.
 
 **Move the skill-explorer routes into the core Connection registry.** The route owner is the plugin and its raw HTTP handlers include filesystem-specific security and binary-compatible responses; moving them would couple the core API to one optional plugin and would not repair other WebServer plugins.
 
@@ -22,8 +24,8 @@ Desktop dispatches every request through `webServer.fetchNamed()` before falling
 
 ## Consequences
 
-Desktop supports optional plugins that register exact `/api/*` routes, with core API handling remaining the fallback for paths without a named route. The custom carrier's loopback metadata is limited to `dsh-app://` named-route dispatch and is not exposed on a network socket. Static-resource stream compatibility is recorded separately in [the Desktop Node-stream carrier note](2026-09-24-desktop-plugin-static-stream-carrier.md).
+Desktop supports optional plugins that register exact `/api/*` routes while preserving core RPC access. Core API handling owns every non-404 API response; named plugin dispatch is the fallback for paths without a core endpoint. The custom carrier's loopback metadata is limited to `dsh-app://` named-route dispatch and is not exposed on a network socket. Static-resource stream compatibility is recorded separately in [the Desktop Node-stream carrier note](2026-09-24-desktop-plugin-static-stream-carrier.md).
 
 ## Testing
 
-The WebServer carrier regression checks that a `dsh-app://` named route observes loopback Host and socket metadata. The Desktop Host dispatcher now exercises the same named-route-first ordering for plugin API paths before invoking the core API fallback.
+The WebServer carrier regression checks that a `dsh-app://` named route observes loopback Host and socket metadata. The Desktop Host routing regression checks that core API responses bypass WebServer authentication and that a core 404 reaches a plugin API route.

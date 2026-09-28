@@ -27,6 +27,7 @@ import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import type {} from '@deepseek-ai/dsh-api-gateway'
 import type { ConnectionFetchHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-modules'
+import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { renderIndexInjections, type IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import {
   DESKTOP_HOST_PROTOCOL_VERSION,
@@ -282,6 +283,44 @@ interface NodeRequestInit extends RequestInit {
   readonly duplex?: 'half'
 }
 
+/** Handlers used by the Desktop in-process request dispatcher. */
+export interface DesktopHostRoutes {
+  /** Core connection API, which does not need browser HTTP trust or auth. */
+  readonly api: ConnectionFetchHandler
+  /** Named plugin routes registered on the shared WebServer. */
+  readonly webServer: Pick<WebServer, 'fetchNamed'>
+  /** Bundled static assets. */
+  readonly assets: ConnectionFetchHandler
+  /** Remote stream transport used by client follow subscriptions. */
+  readonly streams: ConnectionFetchHandler
+}
+
+/**
+ * Dispatch one request carried by Electron's `dsh-app` protocol.
+ *
+ * Desktop calls the core API handler directly so the browser-only Host/Origin
+ * and authentication checks on WebServer's `/api` route cannot reject an
+ * in-process request.
+ * A 404 then falls through to a plugin-owned named `/api/*` route; this keeps
+ * plugin HTTP endpoints available without shadowing the core RPC namespace.
+ * @param request - request received from the Electron renderer.
+ * @param routes - core, plugin, asset, and stream handlers.
+ * @returns the selected response.
+ */
+export async function dispatchDesktopRequest(
+  request: Request,
+  routes: DesktopHostRoutes,
+): Promise<Response> {
+  const pathname = new URL(request.url).pathname
+  if (pathname === DESKTOP_STREAM_PATH) return await routes.streams.fetch(request)
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
+    const apiResponse = await routes.api.fetch(request)
+    if (apiResponse.status !== 404) return apiResponse
+    return await routes.webServer.fetchNamed(request) ?? apiResponse
+  }
+  return await routes.webServer.fetchNamed(request) ?? await routes.assets.fetch(request)
+}
+
 /**
  * Boot one installed desktop npm project.
  * @param runtimeDir - immutable dsh packages supplied by the Electron application.
@@ -357,17 +396,7 @@ export async function runDesktopHost(
           signal: controller.signal,
         }
         const request = new Request(url, init)
-        const pathname = url.pathname
-        // Named plugin routes, including plugin-owned /api/* endpoints, live
-        // on webServer. Desktop never listens; fetchNamed answers them over
-        // the in-process carrier before the core API fallback is considered.
-        const pluginResponse = pathname === DESKTOP_STREAM_PATH || pathname.startsWith('/plugins/')
-          ? undefined
-          : await webServer.fetchNamed(request)
-        const response = pathname === DESKTOP_STREAM_PATH
-          ? await streams.fetch(request)
-          : pluginResponse
-            ?? (pathname.startsWith('/api/') ? await api.fetch(request) : await assets.fetch(request))
+        const response = await dispatchDesktopRequest(request, { api, webServer, assets, streams })
         await writeResponse(encodeDesktopResponseStart(command.streamId, {
           status: response.status,
           headers: [...response.headers.entries()],
