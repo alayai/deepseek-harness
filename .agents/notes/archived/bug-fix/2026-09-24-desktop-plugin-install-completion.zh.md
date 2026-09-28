@@ -1,6 +1,7 @@
 # Agent Note: 让 Desktop 插件事务独立于主窗口导航完成
 
 Status: implemented
+Archived: 2026-09-28
 
 [English](2026-09-24-desktop-plugin-install-completion.md) | 中文
 

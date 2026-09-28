@@ -28,4 +28,4 @@ Desktop builds remain on Electron `44.0.0` until a native add-on release explici
 
 ## Testing
 
-The Windows x64 NSIS build logs `electronVersion=44.0.0`. The unpacked packaged executable reports Electron `44.0.0`, Node `24.18.1`, and V8 `15.2.124.13-electron.0`, and the generated installer is `coco-lite-v0.1.7-win-x64.exe`. `git diff --check` passes.
+The Windows x64 NSIS build logs `electronVersion=44.0.0`. The unpacked packaged executable reports Electron `44.0.0`, Node `24.18.1`, and V8 `15.2.124.13-electron.0`, and the generated installer follows `coco-lite-v<version>-win-x64.exe`. `git diff --check` passes.

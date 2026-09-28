@@ -31,7 +31,7 @@ export const zh = {
   'collapse': '收起',
   'expand': '展开',
   'back': '返回',
-  'brand.localBuild': 'DSH 本地构建',
+  'brand.localBuild': 'ETRX一体机智能平台v1.0 LITE',
   'workspace.defaultName': '默认工作区',
   'unknown': '未知',
   'none': '无',

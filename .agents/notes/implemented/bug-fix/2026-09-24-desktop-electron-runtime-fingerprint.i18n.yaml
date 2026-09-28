@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-24-desktop-electron-runtime-fingerprint.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-24-desktop-electron-runtime-fingerprint.md
-2026-09-24-desktop-electron-runtime-fingerprint.md: beaf05103dc726c1fa86a1f4e585baabf00eedc9
-2026-09-24-desktop-electron-runtime-fingerprint.zh.md: b5ced259408a7cbe6f8b6896948561f159548ee8
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint:
+  en: 6628b5fefdb39b14
+  zh: 68da9e98b222d73c
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint/problem:
+  en: 5ee7737405239439
+  zh: ee3bbbbd3278bbc1
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint/decision:
+  en: 6205c001f8f48aa4
+  zh: a823dc5242a53639
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint/alternatives-considered:
+  en: 11cc8cb40b7c5377
+  zh: 22d5d8904ca7e25e
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint/consequences:
+  en: 0cc56ce6c29163dc
+  zh: 11d21b6545972019
+/agent-note-pin-desktop-electron-to-the-native-runtime-fingerprint/testing:
+  en: e255b3295b7aa764
+  zh: 622f430df19498e3

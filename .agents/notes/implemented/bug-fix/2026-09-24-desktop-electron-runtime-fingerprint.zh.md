@@ -28,4 +28,4 @@ Desktop 将 Electron 声明为精确版本 `44.0.0`，lockfile 也记录相同�
 
 ## 测试
 
-Windows x64 NSIS 构建日志记录 `electronVersion=44.0.0`。未封装的打包可执行文件报告 Electron `44.0.0`、Node `24.18.1` 和 V8 `15.2.124.13-electron.0`，生成的安装包名称为 `coco-lite-v0.1.7-win-x64.exe`。`git diff --check` 已通过。
+Windows x64 NSIS 构建日志记录 `electronVersion=44.0.0`。未封装的打包可执行文件报告 Electron `44.0.0`、Node `24.18.1` 和 V8 `15.2.124.13-electron.0`，生成的安装包名称遵循 `coco-lite-v<version>-win-x64.exe`。`git diff --check` 已通过。

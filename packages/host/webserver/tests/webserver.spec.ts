@@ -9,7 +9,6 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { Readable } from 'node:stream'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -29,7 +28,7 @@ afterEach(async () => {
 })
 
 /** Write a cordis.yml with one webserver row, then boot it through the real Loader. */
-async function loadComposition(port = 0, gzip = false, listen = true): Promise<Context> {
+async function loadComposition(port = 0, gzip = false): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-webserver-loader-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -37,7 +36,6 @@ async function loadComposition(port = 0, gzip = false, listen = true): Promise<C
     '  config:',
     "    host: '127.0.0.1'",
     `    port: ${String(port)}`,
-    `    listen: ${listen ? 'true' : 'false'}`,
     ...(gzip
       ? [
         '    compression: gzip',
@@ -103,7 +101,6 @@ describe('real Loader composition', () => {
     expect(HttpServer.Config({ host: '127.0.0.1', port: 0 })).toEqual({
       host: '127.0.0.1',
       port: 0,
-      listen: true,
       compression: 'none',
       compressionLevel: 1,
       compressionThresholdBytes: 1024,
@@ -376,153 +373,5 @@ describe('real Loader composition', () => {
       if (root !== undefined) await rm(root, { recursive: true, force: true })
       root = firstRoot
     }
-  })
-
-  it('dispatches named plugin routes without binding a socket', { timeout: 60_000 }, async () => {
-    const loaded = await loadComposition(0, false, false)
-    const server = loaded.webServer
-    expect(server.port).toBe(0)
-    const icon = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/icon',
-      handler: (_req, res) => {
-        res.writeHead(200, {
-          'cache-control': 'public, max-age=31536000, immutable',
-          'content-length': String(icon.byteLength),
-          'content-type': 'image/png',
-        })
-        res.end(icon)
-      },
-    })
-    let headersSentAfterSet = true
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/status',
-      handler: (_req, res) => {
-        res.setHeader('content-type', 'text/plain')
-        headersSentAfterSet = res.headersSent
-        res.statusCode = 418
-        res.end('teapot')
-      },
-    })
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/no-content',
-      handler: (_req, res) => {
-        res.writeHead(204)
-        res.end()
-      },
-    })
-    let initialWriteAccepted = true
-    let drainCount = 0
-    let writeStream!: (chunk: string) => void
-    let endStream!: (chunk: string) => void
-    let destroyStream!: () => void
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/stream',
-      handler: (_req, res) => {
-        res.writeHead(200, { 'content-type': 'text/plain' })
-        initialWriteAccepted = res.write('first')
-        if (!initialWriteAccepted) res.once('drain', () => { drainCount += 1 })
-        writeStream = (chunk) => { res.write(chunk) }
-        endStream = (chunk) => { res.end(chunk) }
-        destroyStream = () => { res.destroy() }
-      },
-    })
-    let cancelled = false
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/cancel',
-      handler: (_req, res) => {
-        res.on('close', () => { cancelled = true })
-        res.writeHead(200, { 'content-type': 'text/plain' })
-        res.write('open')
-      },
-    })
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/echo',
-      handler: async (req, res) => {
-        const chunks: Buffer[] = []
-        for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({
-          method: req.method,
-          url: req.url,
-          host: req.headers.host,
-          remoteAddress: req.socket.remoteAddress,
-          body: Buffer.concat(chunks).toString('utf8'),
-        }))
-      },
-    })
-    server.register({
-      kind: 'exact',
-      path: '/dsh1024/piped',
-      handler: (_req, res) => {
-        res.writeHead(200, { 'content-type': 'text/plain' })
-        Readable.from([Buffer.from('piped')]).pipe(res)
-      },
-    })
-
-    const image = await server.fetchNamed(new Request('dsh-app://app/dsh1024/icon'))
-    expect(image).toBeDefined()
-    expect(image!.status).toBe(200)
-    expect(image!.headers.get('content-type')).toBe('image/png')
-    expect(Buffer.from(await image!.arrayBuffer())).toEqual(icon)
-
-    const echoed = await server.fetchNamed(new Request('dsh-app://app/dsh1024/echo?revalidate=1', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{"ok":true}',
-    }))
-    expect(echoed).toBeDefined()
-    expect(await echoed!.json()).toEqual({
-      method: 'POST',
-      url: '/dsh1024/echo?revalidate=1',
-      host: '127.0.0.1',
-      remoteAddress: '127.0.0.1',
-      body: '{"ok":true}',
-    })
-
-    const piped = await server.fetchNamed(new Request('dsh-app://app/dsh1024/piped'))
-    expect(piped?.status).toBe(200)
-    expect(await piped?.text()).toBe('piped')
-
-    const status = await server.fetchNamed(new Request('dsh-app://app/dsh1024/status'))
-    expect(headersSentAfterSet).toBe(false)
-    expect(status?.status).toBe(418)
-    expect(await status?.text()).toBe('teapot')
-
-    const noContent = await server.fetchNamed(new Request('dsh-app://app/dsh1024/no-content'))
-    expect(noContent?.status).toBe(204)
-    expect(noContent?.body).toBeNull()
-
-    const streamed = await server.fetchNamed(new Request('dsh-app://app/dsh1024/stream'))
-    const reader = streamed!.body!.getReader()
-    const decoder = new TextDecoder()
-    try {
-      expect(initialWriteAccepted).toBe(false)
-      expect(drainCount).toBe(0)
-      expect(decoder.decode((await reader.read()).value)).toBe('first')
-      await Promise.resolve()
-      expect(drainCount).toBe(1)
-      writeStream('second')
-      expect(decoder.decode((await reader.read()).value)).toBe('second')
-      await Promise.resolve()
-      expect(drainCount).toBe(1)
-      endStream('third')
-      expect(decoder.decode((await reader.read()).value)).toBe('third')
-      expect(await reader.read()).toEqual({ done: true, value: undefined })
-    } finally {
-      destroyStream()
-    }
-
-    const cancellable = await server.fetchNamed(new Request('dsh-app://app/dsh1024/cancel'))
-    await cancellable!.body!.cancel()
-    expect(cancelled).toBe(true)
-
-    expect(await server.fetchNamed(new Request('dsh-app://app/index.html'))).toBeUndefined()
   })
 })

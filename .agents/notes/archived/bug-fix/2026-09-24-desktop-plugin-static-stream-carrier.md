@@ -1,6 +1,7 @@
 # Agent Note: Keep Node stream compatibility in the Desktop HTTP carrier
 
 Status: implemented
+Archived: 2026-09-28
 
 English | [中文](2026-09-24-desktop-plugin-static-stream-carrier.zh.md)
 

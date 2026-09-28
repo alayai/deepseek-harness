@@ -1,6 +1,7 @@
 # Agent Note: Keep Desktop Host and browser Client peer graphs separate
 
 Status: implemented
+Archived: 2026-09-28
 
 English | [中文](2026-09-24-desktop-client-peer-graph.zh.md)
 

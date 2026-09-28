@@ -11,7 +11,7 @@ export interface OfficialBrandMarkProps extends SidebarBrandMarkOwnerProps {
 /**
  * Render the official mark with the presentation requested by its host surface.
  * @param props - Host-supplied mark presentation.
- * @returns the official CoCo AI mark.
+ * @returns the official ETRX mark.
  */
 export function OfficialBrandMark({ size, className }: OfficialBrandMarkProps) {
   return (
@@ -30,7 +30,7 @@ export function OfficialBrandMark({ size, className }: OfficialBrandMarkProps) {
 
 /**
  * Render the official name artwork without its independently slotted mark.
- * @returns the official name wordmark.
+ * @returns the official ETRX name wordmark.
  */
 export function OfficialBrandName() {
   return <BrandWordmark includeMark={false} />

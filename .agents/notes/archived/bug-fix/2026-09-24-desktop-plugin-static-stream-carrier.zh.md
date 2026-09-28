@@ -1,6 +1,7 @@
 # Agent Note: 保持 Desktop HTTP 载体兼容 Node 流
 
 Status: implemented
+Archived: 2026-09-28
 
 [English](2026-09-24-desktop-plugin-static-stream-carrier.md) | 中文
 

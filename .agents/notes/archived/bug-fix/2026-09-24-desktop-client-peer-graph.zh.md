@@ -1,6 +1,7 @@
 # Agent Note: 分离 Desktop Host 与浏览器 Client 的 peer 依赖图
 
 Status: implemented
+Archived: 2026-09-28
 
 [English](2026-09-24-desktop-client-peer-graph.md) | 中文
 

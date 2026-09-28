@@ -1,6 +1,7 @@
 # Agent Note: Complete Desktop plugin transactions independently of primary-window navigation
 
 Status: implemented
+Archived: 2026-09-28
 
 English | [中文](2026-09-24-desktop-plugin-install-completion.zh.md)
 

@@ -1,6 +1,7 @@
 # Agent Note: Preserve plugin API routes in the Desktop carrier
 
 Status: implemented
+Archived: 2026-09-28
 
 English | [中文](2026-09-24-desktop-plugin-api-routes.zh.md)
 

@@ -1,6 +1,7 @@
 # Agent Note: 在 Desktop 载体中保留插件 API 路由
 
 Status: implemented
+Archived: 2026-09-28
 
 [English](2026-09-24-desktop-plugin-api-routes.md) | 中文
 
