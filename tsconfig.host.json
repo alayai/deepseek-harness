@@ -5,7 +5,8 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rewriteRelativeImportExtensions": false
+    "rewriteRelativeImportExtensions": false,
+    "typeRoots": ["./node_modules/@types"]
   },
   "include": [
     "apps/web/product-isolation.ts",
