@@ -1,6 +1,6 @@
 /** Host registry and HTTP adapter for generic Connection RPC channels. */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context, Service, symbols } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -34,6 +34,16 @@ import type {
 const INVALID_REQUEST_RPC_ID = RpcId('invalid-request')
 const CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
 const ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+
+/**
+ * Drop Cordis's service-origin overlay. Property lookup on that overlay
+ * follows the Connection fiber, which does not inject sibling services.
+ */
+function callerContext(traced: Context): Context {
+  if (!Object.hasOwn(traced, symbols.shadow)) return traced
+  const caller: unknown = Object.getPrototypeOf(traced)
+  return Context.is(caller) ? caller : traced
+}
 
 interface ConnectionRpcInterceptor {
   readonly matches: ConnectionRpcEndpointMatcher
@@ -188,8 +198,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
         await bridge(req, res, fetchHandler)
       },
     }
-    return owner.effect(
-      () => owner.webServer.register(route),
+    // The traceable service overlays the caller with the Connection fiber.
+    // Route lookup has to use the caller: webServer is a sibling service, and
+    // the overlay would resolve it on Connection, which does not inject it.
+    const caller = callerContext(owner)
+    return caller.effect(
+      () => caller.webServer.register(route),
       `client-connection: ${channel} rpc channel`,
     )
   }

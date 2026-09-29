@@ -345,6 +345,37 @@ describe('connection node half', () => {
     await dispose()
   })
 
+  it('registers a dedicated channel for a sibling that injects webServer', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    provideBrowserCredentials(ctx)
+    const web = ctx.plugin({
+      name: 'web',
+      apply(inner: Context) {
+        inner.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+      },
+    })
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await Promise.all([web.await(), fiber.await()])
+    const dashboard = ctx.plugin({
+      name: 'dashboard',
+      inject: ['connection', 'webServer'],
+      apply(inner: Context) {
+        inner.connection.rpc.handle('/rpc', async () => ({ ok: true, value: null }))
+      },
+    })
+    try {
+      await dashboard.await()
+      expect(routes.some(route => route.path === '/rpc')).toBe(true)
+      await dashboard.dispose()
+      expect(routes.some(route => route.path === '/rpc')).toBe(false)
+    } finally {
+      await dashboard.dispose()
+      await fiber.dispose()
+      await web.dispose()
+    }
+  })
+
   it('provides a disposable dedicated RPC channel', async () => {
     const ctx = new Context()
     const routes: WebRoute[] = []

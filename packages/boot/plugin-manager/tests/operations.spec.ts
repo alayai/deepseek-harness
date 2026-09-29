@@ -300,6 +300,38 @@ it('runs the install with the caller\'s flags and its path specs anchored', asyn
   expect(command.run.mock.calls[0]?.[1]).toEqual(['add', join(context.cwd, 'extra'), '--ignore-scripts'])
 })
 
+it('reuses the store directory recorded by an existing profile installation', async () => {
+  const { dir, context, pnpm } = fixture()
+  const storeDir = join(dir, 'application-store')
+  mkdirSync(join(dir, 'node_modules'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', '.modules.yaml'), `storeDir: ${JSON.stringify(storeDir)}\n`)
+  pnpm.mutate = (target) => { install(target, 'plugin') }
+
+  expect(await runProfilePnpm(context, ['add', 'plugin'], { execution: 'service', outputBytes: 8192 }))
+    .toMatchObject({ exitCode: 0 })
+  expect(command.run.mock.calls[0]?.[1]).toEqual([
+    `--config.store-dir=${storeDir}`, 'view', 'plugin', 'name', 'version', 'peerDependencies', '--json', '--config.fetch-retries=0',
+  ])
+  expect(command.run.mock.calls[1]?.[1]).toEqual([`--config.store-dir=${storeDir}`, 'add', 'plugin'])
+})
+
+it('retains an explicit store directory over the profile record', async () => {
+  const { dir, context, pnpm } = fixture()
+  const recorded = join(dir, 'application-store')
+  const explicit = join(dir, 'explicit-store')
+  mkdirSync(join(dir, 'node_modules'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', '.modules.yaml'), `storeDir: ${JSON.stringify(recorded)}\n`)
+  pnpm.mutate = (target) => { install(target, 'plugin') }
+
+  expect(await runProfilePnpm(context, ['add', 'plugin', `--config.store-dir=${explicit}`], {
+    execution: 'service', outputBytes: 8192,
+  })).toMatchObject({ exitCode: 0 })
+  expect(command.run.mock.calls[0]?.[1]).toEqual([
+    `--config.store-dir=${explicit}`, 'view', 'plugin', 'name', 'version', 'peerDependencies', '--json', '--config.fetch-retries=0',
+  ])
+  expect(command.run.mock.calls[1]?.[1]).toEqual(['add', 'plugin', `--config.store-dir=${explicit}`])
+})
+
 it.each([
   { answer: 'a failing lookup', view: { exitCode: 1, stdout: '' } },
   { answer: 'an unparsable answer', view: { exitCode: 0, stdout: 'ERR_PNPM_UNEXPECTED' } },
@@ -917,6 +949,21 @@ it('reads the registry pnpm\'s own configuration names in the profile, and answe
   expect(await readProfileRegistry(dir, { timeoutMs: 5 })).toBeNull()
   answer({ exitCode: 0, stdout: '', stderr: '' })
   expect(await readProfileRegistry(dir, { timeoutMs: 5 })).toBeNull()
+})
+
+it('uses the recorded store for profile inspection commands', async () => {
+  const { dir } = fixture()
+  const storeDir = join(dir, 'application-store')
+  mkdirSync(join(dir, 'node_modules'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', '.modules.yaml'), `storeDir: ${JSON.stringify(storeDir)}\n`)
+  command.run.mockResolvedValueOnce({ exitCode: 0, stdout: 'https://registry.example/\n' } as never)
+  expect(await readProfileRegistry(dir, { timeoutMs: 5 })).toBe('https://registry.example/')
+  expect(command.run.mock.lastCall?.[1]).toEqual([`--config.store-dir=${storeDir}`, 'config', 'get', 'registry'])
+  command.run.mockResolvedValueOnce({ exitCode: 0, stdout: '{"name":"x"}', stderr: '', timedOut: false } as never)
+  await viewProfilePackage(dir, 'x', { timeoutMs: 5 })
+  expect(command.run.mock.lastCall?.[1]).toEqual([
+    `--config.store-dir=${storeDir}`, 'view', 'x', 'name', 'version', 'description', 'dsh', '--json', '--config.fetch-retries=0',
+  ])
 })
 
 it('asks the registry through pnpm view in the profile directory, without pnpm\'s own retries, and reports how the lookup ended', async () => {

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types",
-    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo",
+    "typeRoots": ["../../../node_modules/@types"]
   },
   "files": [
     "src/api-path.ts",

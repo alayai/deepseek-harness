@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, open, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { execa } from 'execa'
+import { parse } from 'yaml'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
@@ -145,6 +146,55 @@ const INSTALL_COMMANDS = new Set(['add', 'install', 'i'])
 /** Bound on a pre-install registry lookup when the caller names none. */
 const LOOKUP_TIMEOUT_MS = 20_000
 
+/** Return a normalized explicit pnpm store option from an argument list. */
+function explicitStoreDirOption(args: readonly string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (argument === undefined) continue
+    const equals = /^(?:--config\.)?store-dir=(.+)$/u.exec(argument)
+    if (equals?.[1] !== undefined && equals[1].trim() !== '') return `--config.store-dir=${equals[1]}`
+    if (/^(?:--config\.)?store-dir$/u.test(argument)) {
+      const value = args[index + 1]
+      if (value !== undefined && value.trim() !== '') return `--config.store-dir=${value}`
+    }
+  }
+  return undefined
+}
+
+/** Read the store pnpm recorded for an existing profile installation. */
+function recordedProfileStoreDir(dir: string): string | undefined {
+  let parsed: unknown
+  try {
+    parsed = parse(readFileSync(join(dir, 'node_modules', '.modules.yaml'), 'utf8'))
+  } catch {
+    // A profile without readable installation metadata keeps pnpm's normal configuration resolution.
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || !('storeDir' in parsed)) return undefined
+  const storeDir = parsed.storeDir
+  return typeof storeDir === 'string' && storeDir.trim() !== '' ? storeDir : undefined
+}
+
+/** Add the profile's store option after application launcher arguments and before a pnpm command. */
+function profilePnpmArgs(dir: string, launcherArgs: readonly string[], commandArgs: readonly string[]): string[] {
+  if (explicitStoreDirOption(launcherArgs) !== undefined || explicitStoreDirOption(commandArgs) !== undefined) {
+    return [...launcherArgs, ...commandArgs]
+  }
+  const storeDir = recordedProfileStoreDir(dir)
+  return storeDir === undefined
+    ? [...launcherArgs, ...commandArgs]
+    : [...launcherArgs, `--config.store-dir=${storeDir}`, ...commandArgs]
+}
+
+/** Build launcher arguments for a lookup or repair that must retain a store option from another command. */
+function profilePnpmLauncherArgs(dir: string, launcherArgs: readonly string[], commandArgs: readonly string[]): string[] {
+  if (explicitStoreDirOption(launcherArgs) !== undefined) return [...launcherArgs]
+  const storeOption = explicitStoreDirOption(commandArgs)
+  if (storeOption !== undefined) return [...launcherArgs, storeOption]
+  const storeDir = recordedProfileStoreDir(dir)
+  return storeDir === undefined ? [...launcherArgs] : [...launcherArgs, `--config.store-dir=${storeDir}`]
+}
+
 /** Package specs an install command names explicitly, in order. */
 function namedSpecs(args: readonly string[]): string[] {
   const index = args.findIndex(argument => !argument.startsWith('-'))
@@ -161,12 +211,13 @@ function namedSpecs(args: readonly string[]): string[] {
  * @param spec Anchored install spec.
  * @param options Pnpm executable, prefix arguments, the caller's bound and signal.
  * @param environment Environment of the caller's pnpm invocations.
+ * @param storeArgs Arguments of the install command, used to retain an explicit store option.
  * @param flags Flags of the run itself, so the lookup asks the registry that run will use.
  * @returns The package manifest, or undefined when reading it would need the installation itself.
  */
 async function namedSpecManifest(
   dir: string, spec: string, options: PackageOperationOptions, environment: Readonly<Record<string, string | undefined>>,
-  flags: readonly string[],
+  storeArgs: readonly string[], flags: readonly string[],
 ): Promise<object | undefined> {
   const parsed = parseInstallSpec(spec)
   if (parsed.kind === 'path') {
@@ -175,7 +226,7 @@ async function namedSpecManifest(
   }
   if (parsed.kind !== 'registry') return undefined
   const viewed = await execa(options.command ?? 'pnpm', [
-    ...options.args ?? [], 'view', parsed.spec, 'name', 'version', 'peerDependencies', '--json',
+    ...profilePnpmLauncherArgs(dir, options.args ?? [], storeArgs), 'view', parsed.spec, 'name', 'version', 'peerDependencies', '--json',
     ...flags, '--config.fetch-retries=0',
   ], {
     cwd: dir, env: environment, extendEnv: false, reject: false, stdin: 'ignore',
@@ -333,13 +384,14 @@ export async function runProfilePnpm(
   // pnpm runs: an incompatible version is never installed, and the one already in use keeps working.
   const preflight: string[] = []
   const exemptions = readProfileVersionExemptions(dir)
+  const anchoredArgs = args.map(arg => anchorPathSpec(arg, context.cwd))
   // The run's own registry flags, so the lookup asks the registry the installation will use.
-  const registryFlags = args.filter(argument => argument.startsWith('--registry='))
+  const registryFlags = anchoredArgs.filter(argument => argument.startsWith('--registry='))
   for (const raw of namedSpecs(args)) {
     // A spec whose manifest cannot be read or validated is left to the run itself and to the check
     // after installation, which reports what it could not validate.
     try {
-      const manifest = await namedSpecManifest(dir, anchorPathSpec(raw, context.cwd), options, environment, registryFlags)
+      const manifest = await namedSpecManifest(dir, anchorPathSpec(raw, context.cwd), options, environment, anchoredArgs, registryFlags)
       if (manifest === undefined) continue
       const issue = evaluatePluginCompatibility(manifest, exemptions)
       if (issue !== undefined && !issue.exempted) {
@@ -354,7 +406,9 @@ export async function runProfilePnpm(
   // run is killed: a lifecycle script outlives the pnpm process that started it.
   // The CLI keeps the caller's process group, so an interrupt still reaches it.
   const grouped = leadsOwnGroup(options.execution)
-  const child = execa(options.command ?? 'pnpm', [...options.args ?? [], ...args.map(arg => anchorPathSpec(arg, context.cwd))], {
+  const child = execa(options.command ?? 'pnpm', profilePnpmArgs(
+    dir, options.args ?? [], anchoredArgs,
+  ), {
     cwd: dir, env: environment, extendEnv: false, reject: false,
     stdout: options.execution === 'cli' ? 'inherit' : 'pipe',
     stderr: options.execution === 'cli' ? 'inherit' : 'pipe',
@@ -504,7 +558,7 @@ export async function runProfilePnpm(
         await restore()
         const hadLockfile = savedFiles.some(file => file.path.endsWith('pnpm-lock.yaml') && file.text !== undefined)
         const repair = ['install', hadLockfile ? '--frozen-lockfile' : '--config.lockfile=false']
-        const repairing = execa(options.command ?? 'pnpm', [...options.args ?? [], ...repair], {
+        const repairing = execa(options.command ?? 'pnpm', profilePnpmLauncherArgs(dir, options.args ?? [], anchoredArgs).concat(repair), {
           cwd: dir, env: environment, extendEnv: false, reject: false, stdin: 'ignore',
           ...options.idleTimeoutMs === undefined ? {} : { timeout: options.idleTimeoutMs },
         })
@@ -594,7 +648,7 @@ export interface PackageViewOptions {
 export async function readProfileRegistry(
   dir: string, options: { command?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; timeoutMs: number },
 ): Promise<string | null> {
-  const result = await execa(options.command ?? 'pnpm', [...options.args ?? [], 'config', 'get', 'registry'], {
+  const result = await execa(options.command ?? 'pnpm', [...profilePnpmLauncherArgs(dir, options.args ?? [], []), 'config', 'get', 'registry'], {
     cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore', timeout: options.timeoutMs,
   })
   // The registry is the last line: pnpm may print a notice before it.
@@ -624,7 +678,7 @@ export function registryArguments(registry: Registry): string[] {
  */
 export async function viewProfilePackage(dir: string, spec: string, options: PackageViewOptions): Promise<PackageViewResult> {
   const result = await execa(options.command ?? 'pnpm', [
-    ...options.args ?? [], 'view', spec, 'name', 'version', 'description', 'dsh', '--json',
+    ...profilePnpmLauncherArgs(dir, options.args ?? [], []), 'view', spec, 'name', 'version', 'description', 'dsh', '--json',
     ...registryArguments(options.registry ?? null), '--config.fetch-retries=0',
   ], {
     cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore',

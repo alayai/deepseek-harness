@@ -50,6 +50,21 @@ function manifestVersion(path: string, subject: string): string {
   return manifest.version
 }
 
+/** Ensure the Electron shell and its Node-mode runtime use one Koffi release. */
+function verifyKoffiVersion(runtimeRoot: string): void {
+  const appManifest = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8')) as {
+    devDependencies?: { koffi?: unknown }
+  }
+  const expected = appManifest.devDependencies?.koffi
+  if (typeof expected !== 'string' || !/^\d+\.\d+\.\d+$/u.test(expected)) {
+    throw new Error(`desktop runtime: invalid Desktop Koffi version ${JSON.stringify(expected)}`)
+  }
+  const runtime = manifestVersion(join(runtimeRoot, 'node_modules', 'koffi', 'package.json'), 'runtime Koffi')
+  if (runtime !== expected) {
+    throw new Error(`desktop runtime: Koffi version mismatch (Desktop ${expected}, runtime ${runtime})`)
+  }
+}
+
 function desktopRelease(): DesktopRelease {
   const version = manifestVersion(join(APP_ROOT, 'package.json'), 'desktop package')
   const dshVersion = manifestVersion(resolve(APP_ROOT, '..', '..', 'package.json'), 'root dsh package')
@@ -140,6 +155,7 @@ async function main(): Promise<void> {
         recursive: true, dereference: true,
         filter: source => desktopRuntimeFileExclusion(relative(modules, source), target, officeEngine) === undefined,
       })
+      verifyKoffiVersion(DSH_OUTPUT_ROOT)
     })
     writeFileSync(join(DSH_OUTPUT_ROOT, 'package.json'), `${JSON.stringify({
       name: '@deepseek-ai/dsh-desktop-runtime', private: true, version: release.version, type: 'module',
