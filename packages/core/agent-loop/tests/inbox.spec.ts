@@ -250,6 +250,28 @@ describe('ReactLoopInbox', () => {
     expect(() => { agent.inbox.append('next-step', first) }).toThrow(`message "${first.id}" is already pending`)
   })
 
+  it('upgrades retired plugin source wrappers before durable admission', async () => {
+    const { agent, session } = await inboxAgent('legacy-plugin-source')
+    const legacy = createUserMessage({
+      content: [{ type: 'text', text: 'plugin context' }],
+      source: { kind: 'plugin', plugin: 'dsh-cad', form: 'instructions' } as never,
+    })
+
+    agent.inbox.append('next-step', legacy)
+
+    expect(agent.inbox.nextStep[0]?.source).toEqual({ kind: 'plugin:dsh-cad', form: 'instructions' })
+    const event = session.snapshotEvents().at(-1)
+    expect(event?.type === 'agent/inbox/spliced' && event.data.inserted[0]?.source)
+      .toEqual({ kind: 'plugin:dsh-cad', form: 'instructions' })
+
+    expect(() => {
+      agent.inbox.append('next-step', createUserMessage({
+        content: [{ type: 'text', text: 'malformed plugin context' }],
+        source: { kind: 'plugin', plugin: 42 } as never,
+      }))
+    }).toThrow('legacy plugin message source requires a nonempty plugin name')
+  })
+
   it('clears both pending lists as durable cancellations', async () => {
     const { ctx, session, agent } = await inboxAgent('clear-inbox')
     const discarded: UserMessage[] = []

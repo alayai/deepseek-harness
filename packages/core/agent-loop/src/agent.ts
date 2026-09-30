@@ -33,7 +33,7 @@ import { joinContextSections, renderContextSections, renderPrompt } from '@deeps
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { Context } from '@deepseek-ai/cordis'
-import { ReactLoopInbox } from './inbox.ts'
+import { normalizeLegacyPluginMessage, ReactLoopInbox } from './inbox.ts'
 import { RuntimeContextProjection } from './runtime-context.ts'
 import { AssistantStreamAttempt } from './assistant-stream.ts'
 import { SystemPromptProjection } from './runtime-context.ts'
@@ -282,7 +282,11 @@ export class ReactLoopAgent implements Agent {
     )
     signal.throwIfAborted()
     if (decision.kind === 'reject') return decision
-    return { ...decision, assembly }
+    return {
+      ...decision,
+      messages: decision.messages.map(normalizeLegacyPluginMessage),
+      assembly,
+    }
   }
 
   /** Whether the assembled tool schemas differ from the logged request header's. */

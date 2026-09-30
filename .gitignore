@@ -40,6 +40,9 @@ apps/web/dist/
 .artifacts/
 .dsh-build/
 .dsh-build-trash/
+.dsh-cad/
+*.step
+*.stl
 .tmp-pnpm/
 .playwright-mcp/
 .orig

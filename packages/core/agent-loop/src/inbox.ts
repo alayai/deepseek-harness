@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-agent-loop/inbox
  */
 
-import type { MessageId } from '@deepseek-ai/dsh-llm'
+import { freezeMessage, type MessageId } from '@deepseek-ai/dsh-llm'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
@@ -23,6 +23,36 @@ export const inboxProjectionSchema = z.object({
   'next-step': z.array(z.custom<UserMessage>()).readonly(),
 }).readonly()
 
+/**
+ * Upgrade the retired plugin wrapper emitted by older external plugins.
+ *
+ * V4 admission deliberately rejects `{ kind: 'plugin', plugin }`, but a
+ * profile can still have that value in a pending inbox checkpoint created by
+ * an older runtime. Normalize it before the next durable splice or user
+ * message append so the checkpoint can drain without weakening V4 validation.
+ * @param message - pending user message supplied by a plugin or checkpoint.
+ * @returns the original message when its source is current, or an immutable
+ * producer-owned copy for the retired wrapper.
+ */
+export function normalizeLegacyPluginMessage(message: UserMessage): UserMessage {
+  const source = message.source as {
+    readonly kind?: string
+    readonly plugin?: unknown
+    readonly [key: string]: unknown
+  }
+  if (source.kind !== 'plugin') return message
+  if (typeof source.plugin !== 'string' || source.plugin.length === 0) {
+    throw new Error('legacy plugin message source requires a nonempty plugin name')
+  }
+  const plugin = source.plugin
+  const normalizedSource = Object.fromEntries(
+    Object.entries(source)
+      .filter(([key]) => key !== 'plugin')
+      .map(([key, value]) => [key, key === 'kind' ? `plugin:${plugin}` : value]),
+  ) as UserMessage['source']
+  return freezeMessage({ ...message, source: normalizedSource })
+}
+
 /** Standard fold that reconstructs pending input and rejects invalid durable splice history. */
 export const inboxProjectionDefinition = {
   key: 'inbox',
@@ -39,7 +69,11 @@ export const inboxProjectionDefinition = {
         || splice.start + removedCount > inbox.length) {
         throw new Error('invalid inbox splice')
       }
-      const next = inbox.toSpliced(splice.start, removedCount, ...splice.inserted)
+      const next = inbox.toSpliced(
+        splice.start,
+        removedCount,
+        ...splice.inserted.map(normalizeLegacyPluginMessage),
+      )
       const ids = new Set<string>()
       for (const message of splice.target === 'next-turn'
         ? [...next, ...state['next-step']]
@@ -108,7 +142,10 @@ export class ReactLoopInbox implements InboxContract {
    */
   claim(target: InboxTarget, turn: number): UserMessage[] {
     const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
+      .map(normalizeLegacyPluginMessage)
+    if (target === 'next-turn') {
+      claimed.push(...this.mutate('next-turn', 0, 1, [], false).map(normalizeLegacyPluginMessage))
+    }
     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
     return claimed
   }
@@ -170,7 +207,7 @@ export class ReactLoopInbox implements InboxContract {
     deleteCount: number,
     inserted: UserMessage[],
   ): UserMessage[] {
-    return this.mutate(target, start, deleteCount, inserted, true)
+    return this.mutate(target, start, deleteCount, inserted.map(normalizeLegacyPluginMessage), true)
   }
 
   /** Locate one pending identity across both owned lists. */

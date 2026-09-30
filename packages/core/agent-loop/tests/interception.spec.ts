@@ -220,6 +220,27 @@ describe('agent/pre-step', () => {
     expect(sent).toContain('extra ctx')
   })
 
+  it('normalizes retired plugin wrappers returned by pre-step listeners', async () => {
+    const adapter = new MockAdapter([textResponse('ok')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('legacy-pre-step-source'), { provider: 'mock', model: 'mock' })
+
+    ctx.on('agent/pre-step', async (): Promise<PreStepDecision> => ({
+      kind: 'enter',
+      messages: [createUserMessage({
+        content: [{ type: 'text', text: 'legacy context' }],
+        source: { kind: 'plugin', plugin: 'legacy-hook' } as never,
+      })],
+    }))
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    const context = events(agent).find(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text === 'legacy context'))
+    expect(context?.type === 'user/message' && context.data.source).toEqual({ kind: 'plugin:legacy-hook' })
+  })
+
   it('does not open another step when a completed turn rewrites pending input to empty', async () => {
     const adapter = new MockAdapter([textResponse('done')])
     const ctx = await harness(adapter)
