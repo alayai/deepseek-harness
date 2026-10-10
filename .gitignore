@@ -8,6 +8,7 @@ lib/
 *.tsbuildinfo
 pnpm-debug.log
 .pnpm-store/
+.tmp-pnpm/
 .cache/
 examples/*/*.jsonl
 .storages/
@@ -32,6 +33,8 @@ mise.toml
 dist-exe/
 /dist/
 apps/desktop/.desktop-build/
+apps/desktop/.desktop-build-clean/
+apps/desktop/.desktop-build-clean2/
 python/sdk-runtime/src/deepseek_harness_runtime/runtime/
 python/**/__pycache__/
 python/**/.pytest_cache/
@@ -39,6 +42,8 @@ packages/**/__pycache__/
 apps/web/dist/
 .artifacts/
 .dsh-build/
+.dsh-build-trash/
+.dsh-cad/
 .dsh-report/
 .playwright-mcp/
 .orig
@@ -47,3 +52,5 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+六向真空法兰歧管.step
+六向真空法兰歧管.stl

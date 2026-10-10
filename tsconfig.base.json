@@ -24,6 +24,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "types": ["node"],
+    // Resolved from this file, not the editor workspace root, so a parent
+    // folder opened as the workspace still finds the hoisted Node types.
+    "typeRoots": ["./node_modules/@types"],
     // Source-level resolution for every repo-local graph. Project references,
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
