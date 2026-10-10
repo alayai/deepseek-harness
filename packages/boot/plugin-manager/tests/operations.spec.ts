@@ -566,6 +566,39 @@ it('anchors relative package specs without rewriting registry specs', () => {
   expect(anchorPathSpec('.', '/workspace')).toBe(resolve('/workspace'))
   expect(anchorPathSpec('file:../plugin', '/workspace/project')).toBe(`file:${resolve('/workspace/plugin')}`)
   expect(anchorPathSpec('package@1', '/workspace')).toBe('package@1')
+  expect(anchorPathSpec('C:/plugins/dsh-x', 'D:\\workspace')).toBe('C:/plugins/dsh-x')
+  expect(anchorPathSpec('\\\\server\\share\\pkg', 'D:\\workspace')).toBe('\\\\server\\share\\pkg')
+})
+
+it('qualifies a drive-less root path from the caller directory on Windows', () => {
+  const spec = '/code/github.com/alayai/dsh-plugins/dsh-etrx-v3'
+  const cwd = 'D:\\code\\MyDSH\\deepseek-harness'
+  if (process.platform === 'win32') {
+    expect(anchorPathSpec(spec, cwd)).toBe(resolve(cwd, spec))
+    expect(anchorPathSpec(`link:${spec}`, cwd)).toBe(`link:${resolve(cwd, spec)}`)
+  } else {
+    expect(anchorPathSpec(spec, cwd)).toBe(spec)
+    expect(anchorPathSpec(`link:${spec}`, cwd)).toBe(`link:${spec}`)
+  }
+})
+
+it('restores the profile when pnpm records a dependency that is not on disk', async () => {
+  const { dir, context, pnpm } = fixture()
+  const manifestBefore = readFileSync(join(dir, 'package.json'), 'utf8')
+  writeFileSync(join(dir, 'pnpm-lock.yaml'), 'original-lock\n')
+  pnpm.mutate = (target) => {
+    const manifest = readProfileManifest('test', target)
+    manifest.dependencies = { ...manifest.dependencies, 'missing-plugin': 'link:/missing/plugin' }
+    writeFileSync(join(target, 'package.json'), JSON.stringify(manifest))
+    writeFileSync(join(target, 'pnpm-lock.yaml'), 'changed-lock\n')
+  }
+  const outcome = await runProfilePnpm(context, ['add', 'missing-plugin'], { execution: 'service', outputBytes: 8192 })
+  expect(outcome.exitCode).toBe(1)
+  expect(outcome.output).toContain('missing-plugin was not installed from link:/missing/plugin')
+  expect(outcome.output).toContain('installation rejected')
+  expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(manifestBefore)
+  expect(readFileSync(join(dir, 'pnpm-lock.yaml'), 'utf8')).toBe('original-lock\n')
+  expect(command.run).toHaveBeenLastCalledWith(expect.anything(), ['install', '--frozen-lockfile'], expect.anything())
 })
 
 it('activates newly installed bundles and leaves retained disabled dependencies disabled', async () => {

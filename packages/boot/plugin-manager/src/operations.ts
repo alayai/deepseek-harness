@@ -55,15 +55,25 @@ export interface PackageOperationOptions {
   lookupTimeoutMs?: number
 }
 
+/** A Windows path that starts at the drive root and names no drive, so pnpm would pin it to the profile's drive. */
+const WINDOWS_ROOT_PATH = /^(?<prefix>file:|link:)?(?<path>\/(?!\/).*|\\(?!\\).*)$/
+
 /** Resolve relative package specs against the caller's directory.
+ * On Windows a drive-less root path such as `/code/plugin` is absolute, but it
+ * follows whichever drive the process happens to use. The profile lives on its
+ * own drive, so qualify that path from the caller's directory before pnpm sees it.
+ * Drive-letter paths and UNC paths are already located and stay as typed.
  * @param argument One pnpm argument.
  * @param cwd Invocation directory, never the profile directory.
  * @returns Anchored argument.
  */
 export function anchorPathSpec(argument: string, cwd: string): string {
-  const match = /^(?<prefix>(?:file|link):)?(?<path>\.{1,2}(?:[/\\].*)?)$/.exec(argument)
-  if (match?.groups?.path === undefined) return argument
-  return `${match.groups.prefix ?? ''}${resolve(cwd, match.groups.path)}`
+  const relative = /^(?<prefix>(?:file|link):)?(?<path>\.{1,2}(?:[/\\].*)?)$/.exec(argument)
+  if (relative?.groups?.path !== undefined) return `${relative.groups.prefix ?? ''}${resolve(cwd, relative.groups.path)}`
+  if (process.platform !== 'win32') return argument
+  const root = WINDOWS_ROOT_PATH.exec(argument)
+  if (root?.groups?.path === undefined) return argument
+  return `${root.groups.prefix ?? ''}${resolve(cwd, root.groups.path)}`
 }
 
 /** Read bundle metadata without loading its JavaScript.
@@ -94,11 +104,27 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
   const previous = after.dsh?.profile?.bundles ?? []
   const bundles = previous.filter((name) => {
     if (!beforeDeps.has(name) && !dependencies.includes(name)) return true
-    return dependencies.includes(name) && bundleManifest(name, dir, anchor) !== undefined
+    if (!dependencies.includes(name)) return false
+    try {
+      return bundleManifest(name, dir, anchor) !== undefined
+    } catch (error) {
+      // The package is selected but not on disk. Keep the selection; startup skips it until install repairs it.
+      void error
+      return true
+    }
   })
   for (const name of dependencies) {
     if (beforeDeps.has(name)) continue
-    const metadata = bundleManifest(name, dir, anchor)
+    let metadata: ProfileManifest | undefined
+    try {
+      metadata = bundleManifest(name, dir, anchor)
+    } catch (error) {
+      options.onOutput?.(
+        `dsh: warning: ${name} is not installed (${String(error)}); not added as a profile layer\n`,
+        'stderr',
+      )
+      continue
+    }
     if (metadata?.dsh?.bundle === undefined) {
       options.onOutput?.(`dsh: warning: ${name} declares no dsh.bundle — installed as a plain dependency, not a profile layer\n`, 'stderr')
       continue
@@ -522,9 +548,13 @@ export async function runProfilePnpm(
       for (const [name, spec] of Object.entries(directDependencies(after))) {
         const packageDir = join(dir, 'node_modules', name)
         const installed = optionalFile(join(packageDir, 'package.json'))
-        if (installed === undefined) continue
         // A dependency this run did not touch never blocks an unrelated operation; profile startup denies it.
         const untouched = beforeDependencies[name] === spec && installedBefore.get(name) === installed
+        if (installed === undefined) {
+          // pnpm records a link to a missing directory and still exits 0. That is not an installed package.
+          if (!untouched) warnings.push(`${name} was not installed from ${spec}`)
+          continue
+        }
         const found: string[] = []
         const issues: IncompatiblePlugin[] = []
         try {
