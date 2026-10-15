@@ -54,3 +54,19 @@ worktrees/
 native/system/test/bin/
 六向真空法兰歧管.step
 六向真空法兰歧管.stl
+
+# tsc declarations emitted beside source. Published types belong in lib/types.
+apps/**/src/**/*.d.ts
+apps/**/src/**/*.d.ts.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+vendor/**/src/**/*.d.ts
+vendor/**/src/**/*.d.ts.map
+!apps/**/styles.d.ts
+!apps/**/vite-env.d.ts
+!packages/**/css-modules.d.ts
+!packages/**/assets.d.ts
+!packages/**/asset-imports.d.ts
+!packages/**/use-sync-external-store.d.ts
+!packages/**/ripgrep.d.ts
+!packages/**/turndown-plugin-gfm.d.ts

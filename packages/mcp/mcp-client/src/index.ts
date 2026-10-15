@@ -13,6 +13,7 @@
  * @module @deepseek-ai/dsh-mcp-client
  */
 
+import type { AuthProvider, OAuthClientProvider } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -90,6 +91,8 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
+  /** Programmatic bearer-token or OAuth provider forwarded to the MCP transport. */
+  authProvider?: AuthProvider | OAuthClientProvider
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
@@ -134,6 +137,7 @@ export const Config = z.union([
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
     url: z.string().required(),
     headers: z.dict(String).default({}),
+    authProvider: z.any(),
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
@@ -142,6 +146,18 @@ export const Config = z.union([
 ]) as z<ConfigInput, Config>
 
 // ---- Plugin apply ----
+
+function validProgrammaticAuthProvider(value: AuthProvider | OAuthClientProvider): boolean {
+  const provider = value as unknown as Readonly<Record<string, unknown>>
+  if (typeof provider.token === 'function') return true
+  return typeof provider.clientMetadata === 'object' && provider.clientMetadata !== null
+    && typeof provider.clientInformation === 'function'
+    && typeof provider.tokens === 'function'
+    && typeof provider.saveTokens === 'function'
+    && typeof provider.redirectToAuthorization === 'function'
+    && typeof provider.saveCodeVerifier === 'function'
+    && typeof provider.codeVerifier === 'function'
+}
 
 /**
  * Connect one MCP server and publish its initial tool generation before activation.
@@ -152,6 +168,10 @@ export const Config = z.union([
  * @returns startup readiness after connection and initial tool discovery settle.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (config.transport === 'streamable-http' && config.authProvider !== undefined
+    && !validProgrammaticAuthProvider(config.authProvider)) {
+    throw new TypeError('mcp-client: authProvider must be an SDK provider supplied programmatically; static config objects are not accepted')
+  }
   // Fail loud at load: reconnect misconfiguration (including programmatic
   // construction that bypassed Schemastery) rejects THIS instance before any
   // effect registers.

@@ -58,6 +58,7 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `serverName` | required | Namespace for the server's tool names; `[A-Za-z0-9_-]{1,32}`, unique inside one registration scope |
 | `command` / `args` / `env` / `cwd` | — | stdio: executable, arguments, extra env merged over scrubbed ambient env, working directory |
 | `url` / `headers` | — | streamable-http: endpoint URL and extra request headers |
+| `authProvider` | — | streamable-http: programmatic MCP SDK bearer-token or OAuth provider; not a YAML credential field |
 | `toolCallTimeoutMs` | `60,000` | Timeout per `tools/call` or resource request |
 | `maxInstructionBytes` | `32,768` | Maximum UTF-8 bytes of server instructions including attribution; an oversized value rejects the connection |
 | `failOnStartupError` | `false` | Reject plugin activation when the initial connection or tool synchronization fails |
@@ -69,6 +70,8 @@ Add one entry per server; nothing else is required. After the harness starts, th
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-mcp-client) is the exhaustive source for every accepted field.
 
 After startup, the server's tools appear as `mcp__<serverName>__<tool>` — try a prompt that uses one. If the initial connection fails, the harness still starts but no tools from that server appear, and an error is logged. Setting `failOnStartupError: true` rejects plugin activation; [app-boot's startup policy](../../boot/app-boot/README.md) still permits an optional MCP entry to fail without aborting the harness.
+
+Plugins that own an OAuth flow may pass the MCP SDK's `AuthProvider` or `OAuthClientProvider` through `authProvider` when mounting this plugin programmatically. The provider owns token storage, refresh, redirect handling, and invalidation; `dsh-mcp-client` forwards it to each replacement transport generation and does not inspect or persist its credentials. Static profile YAML should use `headers` with an existing secret-injection mechanism; plain/static objects in the `authProvider` slot are rejected at runtime.
 
 ### Tool naming and coexistence
 

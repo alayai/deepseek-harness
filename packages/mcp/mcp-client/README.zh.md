@@ -58,6 +58,7 @@ kind: "package-reference"
 | `serverName` | 必填 | 服务器工具名称的 namespace；`[A-Za-z0-9_-]{1,32}`，在一个注册作用域内唯一 |
 | `command` / `args` / `env` / `cwd` | — | stdio：可执行文件、参数、合并到清洗过的环境之上的额外环境变量、工作目录 |
 | `url` / `headers` | — | streamable-http：端点 URL 与额外请求标头 |
+| `authProvider` | — | streamable-http：通过程序化方式提供的 MCP SDK bearer token 或 OAuth provider；不是 YAML 凭据字段 |
 | `toolCallTimeoutMs` | `60,000` | 每次 `tools/call` 或资源请求的超时 |
 | `maxInstructionBytes` | `32,768` | 包括服务器归属信息在内的服务器指令 UTF-8 字节上限；超出时连接失败 |
 | `failOnStartupError` | `false` | 初始连接或工具同步失败时拒绝插件激活 |
@@ -69,6 +70,8 @@ kind: "package-reference"
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-mcp-client)是每个受支持字段的穷尽式真源。
 
 启动后，服务器的工具会以 `mcp__<serverName>__<tool>` 形式出现——试着用一条提示词调用其中一个。如果初始连接失败，harness 仍会启动，但该服务器的工具不会出现，并会记录一条错误。设置 `failOnStartupError: true` 会拒绝插件激活；[app-boot 的启动策略](../../boot/app-boot/README.zh.md)仍允许可选 MCP 配置项失败，而不中止 harness。
+
+拥有 OAuth 流程的插件可以在程序化挂载本插件时，通过 `authProvider` 传入 MCP SDK 的 `AuthProvider` 或 `OAuthClientProvider`。Provider 负责 token 存储、刷新、重定向处理和失效；`dsh-mcp-client` 仅将其转交给每一代替换 transport，不读取或持久化其凭据。静态 profile YAML 应使用 `headers` 和已有的 secret 注入机制；`authProvider` 中的普通/静态对象会在运行时被拒绝。
 
 ### 工具命名与共存
 

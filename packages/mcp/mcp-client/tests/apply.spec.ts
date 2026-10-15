@@ -9,6 +9,7 @@ import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { Config } from '@deepseek-ai/dsh-mcp-client'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // ---- Mock MCP SDK ----
 
@@ -119,6 +120,17 @@ describe('mcp-client plugin module exports', () => {
     expect(resolved.serverName).toBe('github-prod_1')
   })
 
+  it('preserves a programmatic Streamable HTTP auth provider', () => {
+    const authProvider = { token: vi.fn(async () => 'token') }
+    const resolved = ConfigSchema({
+      transport: 'streamable-http',
+      serverName: 'oauth',
+      url: 'https://mcp.example.test/rpc',
+      authProvider,
+    } as never)
+    expect(resolved.authProvider).toBe(authProvider)
+  })
+
   it('Config schema materializes reconnect defaults and merges partial overrides', () => {
     const omitted = ConfigSchema({
       transport: 'stdio',
@@ -189,6 +201,49 @@ describe('apply (plugin lifecycle)', () => {
     expect(mockSetNotificationHandler).toHaveBeenCalled()
     expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
     expect(ctx.tools.get('remote')).toBeUndefined()
+  })
+
+  it('forwards a programmatic auth provider to Streamable HTTP transports', async () => {
+    const authProvider = { token: vi.fn(async () => 'token') }
+    await apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'oauth',
+      url: 'https://mcp.example.test/rpc',
+      headers: { 'x-api-key': 'fixed' },
+      authProvider,
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })
+    expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+      new URL('https://mcp.example.test/rpc'),
+      { requestInit: { headers: { 'x-api-key': 'fixed' } }, authProvider },
+    )
+  })
+
+  it('rejects a static object in the programmatic auth provider slot', async () => {
+    await expect(apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'oauth-static',
+      url: 'https://mcp.example.test/rpc',
+      headers: {},
+      authProvider: {} as never,
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })).rejects.toThrow('supplied programmatically')
+    expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
+  })
+
+  it('rejects an incomplete OAuth provider shape', async () => {
+    await expect(apply(ctx, {
+      transport: 'streamable-http',
+      serverName: 'oauth-incomplete',
+      url: 'https://mcp.example.test/rpc',
+      headers: {},
+      authProvider: { tokens() {}, clientInformation() {} } as never,
+      toolCallTimeoutMs: 60_000,
+      failOnStartupError: true,
+    })).rejects.toThrow('supplied programmatically')
+    expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
   })
 
   it('keeps the Cordis plugin loading until initial discovery publishes its tools', async () => {
