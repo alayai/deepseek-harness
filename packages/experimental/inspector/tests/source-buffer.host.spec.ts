@@ -4,7 +4,8 @@ import { MessageChannel } from 'node:worker_threads'
 import { describe, expect, it, vi } from 'vitest'
 import { HostBridgePublisher } from '../src/host/bridge/publisher.ts'
 import { inspectorId } from '../src/shared/bridge/ids.ts'
-import { InspectorSourceBuffer, type InspectorSourceBufferOptions } from '../src/shared/bridge/buffer.ts'
+import { InspectorSourceBuffer, maxRetainedPayloadBytes, type InspectorSourceBufferOptions } from '../src/shared/bridge/buffer.ts'
+import { jsonByteLength } from '../src/shared/json.ts'
 import type { InspectorSourceDescriptor } from '../src/shared/bridge/messages/observation.ts'
 
 const sourceId = inspectorId<'InspectorSourceId'>('source-buffer-test', 'sourceId')
@@ -61,6 +62,17 @@ describe('Inspector source buffer', () => {
     const cyclic: Record<string, unknown> = {}
     cyclic.self = cyclic
     expect(() => { records.publish('test/event', cyclic as never, 1) }).toThrow('lossless JSON data')
+  })
+
+  it('retains a payload that fills the frame after the record envelope', () => {
+    const maxFrameBytes = 8_192
+    const records = buffer(4, { maxFrameBytes })
+    const topic = 'cordis/tree'
+    const payload = 'x'.repeat(maxRetainedPayloadBytes(maxFrameBytes, topic) - 2)
+    expect(jsonByteLength(payload)).toBe(maxRetainedPayloadBytes(maxFrameBytes, topic))
+    expect(() => { records.setState(topic, payload, -Number.MAX_VALUE) }).not.toThrow()
+    expect(() => { records.setState(topic, `${payload}y`, -Number.MAX_VALUE) })
+      .toThrow('source state exceeds the source-frame byte limit')
   })
 
   it('rejects oversized retained state without replacing the previous value', () => {

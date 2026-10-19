@@ -17,6 +17,24 @@ export function buildDevtools(): Promise<{ files: number; bytes: number }> {
   return pending
 }
 
+/** Replace one directory, retrying while Windows still has the previous tree open. */
+async function publishDirectory(source: string, output: string): Promise<void> {
+  let last: unknown
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await rm(output, { recursive: true, force: true })
+      await rename(source, output)
+      return
+    } catch (error) {
+      last = error
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') throw error
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)))
+    }
+  }
+  throw last
+}
+
 async function compile(): Promise<{ files: number; bytes: number }> {
   const lib = fileURLToPath(new URL('../lib/', import.meta.url))
   await mkdir(lib, { recursive: true })
@@ -42,8 +60,7 @@ async function compile(): Promise<{ files: number; bytes: number }> {
       files: files.sort((left, right) => left.path.localeCompare(right.path)),
     }, null, 2)}\n`)
     const output = join(lib, 'devtools')
-    await rm(output, { recursive: true, force: true })
-    await rename(temporary, output)
+    await publishDirectory(temporary, output)
     console.log(`DevTools npm ${DEVTOOLS_NPM_VERSION}: ${files.length} files, ${bytes} bytes`)
     return { files: files.length, bytes }
   } finally {

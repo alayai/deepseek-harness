@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-cmdline'
 import { resolveInspectorOptions, startInspector, type InspectorHandle, type InspectorOptions } from './bridge/controller.ts'
 import type { InspectorClientBootstrap } from '../shared/bridge/messages/control.ts'
 import { createInspectorService } from '../shared/service.ts'
-import { publishCordisTree } from './inspection/cordis.ts'
+import { cordisTreeStateBudget, publishCordisTree } from './inspection/cordis.ts'
 import { INSPECTOR_BOOTSTRAP_PATH, INSPECTOR_CLIENT_QUERY, readInspectorClientSelection } from '../shared/web.ts'
 import { disposeInspectorResources } from '../shared/dispose.ts'
 
@@ -79,7 +79,7 @@ export async function apply(ctx: Context, config: HostPluginConfig): Promise<voi
       const { default: serveStatic } = await import('serve-static')
       disposers.push(publishCordisTree(ctx, handle.source, {
         maxNodes: spec.maxCordisNodes,
-        maxBytes: spec.maxSourceFrameBytes - 4_096,
+        maxBytes: cordisTreeStateBudget(spec.maxSourceFrameBytes),
       }))
       disposers.push(ctx.provide('inspector', createInspectorService(handle.source)))
       disposers.push(ctx.on('webserver/index-inject', (table: IndexInjection[]) => {

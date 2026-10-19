@@ -7,6 +7,22 @@ import { INSPECTOR_PROTOCOL_VERSION } from './version.ts'
 
 const SOURCE_FRAME_OVERHEAD_BYTES = 4_096
 
+/** Finite number with the longest JSON text. `JSON.stringify` uses the shortest round-trip form. */
+const LONGEST_JSON_NUMBER = -Number.MAX_VALUE
+
+/**
+ * Largest payload `setState` can retain for one topic that occupies the whole frame.
+ * The budget subtracts the transport overhead and the JSON envelope of
+ * `{ monotonicMs, topic, payload }`, measured with the longest finite timestamp.
+ * @param maxFrameBytes - Encoded limit of one source frame.
+ * @param topic - Retained state topic. Its length changes the envelope.
+ * @returns Maximum `jsonByteLength` of that topic's payload. Zero when the frame cannot hold the envelope.
+ */
+export function maxRetainedPayloadBytes(maxFrameBytes: number, topic: string): number {
+  const envelope = jsonByteLength([{ monotonicMs: LONGEST_JSON_NUMBER, topic, payload: null }]) - jsonByteLength(null)
+  return Math.max(0, maxFrameBytes - SOURCE_FRAME_OVERHEAD_BYTES - envelope)
+}
+
 /** Limits and declared topics shared by both source transports. */
 export interface InspectorSourceBufferOptions {
   readonly topics: readonly string[]

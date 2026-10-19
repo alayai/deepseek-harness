@@ -25,7 +25,13 @@ export function observeCordisTree(
   const publish = (): void => {
     scheduled = false
     if (closed) return
-    listener(collector.snapshot())
+    try {
+      listener(collector.snapshot())
+    } catch (error) {
+      // Publication runs from a microtask. A size rejection must not become an uncaught exception
+      // and tear down the host; the previous retained snapshot stays in place.
+      ctx.logger.warn('inspector: Cordis tree snapshot was not published', error)
+    }
   }
   const schedule = (): void => {
     if (scheduled || closed) return

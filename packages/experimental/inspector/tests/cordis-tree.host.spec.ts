@@ -275,6 +275,22 @@ describe('Cordis tree inspection', () => {
     await fiber.dispose()
   })
 
+  it('logs an oversized Cordis snapshot instead of leaving an uncaught exception', async () => {
+    const root = new Context()
+    const warn = vi.spyOn(root.logger, 'warn').mockImplementation(() => {})
+    const listener = vi.fn()
+    const dispose = observeCordisTree(root, listener, { maxNodes: 100, maxBytes: 1 })
+    expect(listener).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledTimes(1)
+
+    root.emit('internal/plugin', root.fiber)
+    await Promise.resolve()
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(listener).not.toHaveBeenCalled()
+    dispose()
+    warn.mockRestore()
+  })
+
   it('coalesces Cordis notifications and ignores a queued publication after disposal', async () => {
     const root = new Context()
     const listener = vi.fn()
