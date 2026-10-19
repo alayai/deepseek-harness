@@ -128,6 +128,7 @@ describe('mcp-client plugin module exports', () => {
       url: 'https://mcp.example.test/rpc',
       authProvider,
     } as never)
+    if (resolved.transport !== 'streamable-http') throw new Error('expected streamable-http config')
     expect(resolved.authProvider).toBe(authProvider)
   })
 
