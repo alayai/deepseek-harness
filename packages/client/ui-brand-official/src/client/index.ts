@@ -10,16 +10,18 @@ export const inject = ['slots']
 
 /**
  * Fill the sidebar and conversation-hero brand slots as one declaration-aware
- * registration set.
+ * registration set. The Coco mark is installed for every client profile. The
+ * name wordmark is installed only for official builds, so a local build keeps
+ * its version line.
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  if (process.env.DSH_CLIENT_BUILD_PROFILE !== 'official') return
+  const official = process.env.DSH_CLIENT_BUILD_PROFILE === 'official'
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', () =>
       ctx.slots.inject('conversation.hero.brand.mark', function* () {
         yield ctx.slots.register({ name: 'sidebar.brand.mark' }, OfficialBrandMark)
-        yield ctx.slots.register({ name: 'sidebar.brand.name' }, OfficialBrandName)
+        if (official) yield ctx.slots.register({ name: 'sidebar.brand.name' }, OfficialBrandName)
         yield ctx.slots.register({ name: 'conversation.hero.brand.mark' }, OfficialBrandMark)
       })))
 }
