@@ -9,11 +9,11 @@
  * cannot be outvoted by accident.
  *
  * The shipped guide is a muted compass over the pinned entry capsules every
- * registered type contributed, centred in the body, with no heading, as a
- * browser start page shows its doors without a caption. While at most four
- * capsules are visible, a capsule with a description shows it under the title;
- * a longer list drops every description to stay light. A More card follows
- * while `sidebar.right.tab.guide.actions` has registrations.
+ * registered type contributed. Capsules sit two per row and the body scrolls,
+ * so a long list stays reachable. While at most four capsules are visible, a
+ * capsule with a description shows it under the title; a longer list drops
+ * every description to stay light. A More card follows while
+ * `sidebar.right.tab.guide.actions` has registrations.
  * Picking one opens that type as a page
  * in this tab's place, so the guide is a doorway rather than a page that stays
  * open.

@@ -29,6 +29,7 @@ tmp/
 .vscode/
 .DS_Store
 .idea
+.codegraph/
 mise.toml
 dist-exe/
 /dist/
