@@ -32,6 +32,8 @@ export const en = {
   'more': 'More',
   'collapse': 'Collapse',
   'expand': 'Expand',
+  'subtitle.expand': 'Expand description for {name}',
+  'subtitle.collapse': 'Collapse description for {name}',
   'back': 'Back',
   'brand.localBuild': 'ETRX一体机智能平台 v0.2.1',
   'workspace.defaultName': 'Default workspace',

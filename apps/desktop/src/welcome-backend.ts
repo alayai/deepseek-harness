@@ -35,13 +35,13 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Connect native welcome operations using the main process's existing Host authentication.
- * @param hostUrl - URL supplied by the running Desktop Host; only the origin is used.
- * @param cookie - Cookie header from the Host launch token exchange.
- * @param send - HTTP transport, defaulting to Node fetch without a browser cookie store.
+ * Connect the native HTTP client to the Desktop Host; every request sends `cookie` explicitly and uses no cookie jar.
+ * @param hostUrl - URL of the running Desktop Host; only its origin is used.
+ * @param cookie - Cookie header returned by `authenticateWebHost` for this Host.
+ * @param send - HTTP client for Host requests.
  * @returns metadata reads and write-only credential operations over standard RPC.
  */
-export function desktopWelcomeBackend(
+export function connectDesktopWelcome(
   hostUrl: string,
   cookie: string,
   send: (input: string, init?: RequestInit) => Promise<Response> = fetch,
@@ -69,7 +69,7 @@ export function desktopWelcomeBackend(
     }
     return envelope.result.value
   }
-  const account = desktopAccountBackend(origin, invoke, () => Promise.resolve(cookie))
+  const account = desktopAccountBackend(origin, invoke, cookie)
   const settingsAndReference = async () => {
     const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
     if (!record(settings) || !Array.isArray(settings.namespaces)) throw new Error('desktop welcome: missing settings namespaces')

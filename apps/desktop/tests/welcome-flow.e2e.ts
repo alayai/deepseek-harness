@@ -11,7 +11,7 @@ import { DesktopHostProcess } from '../src/host-process.ts'
 import { DesktopProjectManager } from '../src/project-manager.ts'
 import { resolveDesktopPaths } from '../src/paths.ts'
 import { desktopClientMetadata } from '../src/client-metadata.ts'
-import { desktopWelcomeBackend, type DesktopWelcomeBackend } from '../src/welcome-backend.ts'
+import { connectDesktopWelcome, type DesktopWelcomeBackend } from '../src/welcome-backend.ts'
 import { authenticateWebHost } from '../src/web-document.ts'
 import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
 import { prepareDevelopmentProject } from '../scripts/development-project.ts'
@@ -130,7 +130,7 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
         host = new DesktopHostProcess(process.execPath, project, paths.profile)
         const { url } = await host.start()
         hostOrigin = new URL(url).origin
-        backend = desktopWelcomeBackend(url, await authenticateWebHost(url))
+        backend = connectDesktopWelcome(url, await authenticateWebHost(url))
       }
       const status = async () => backend.read()
       const fingerprint = (): string => createHash('sha256')

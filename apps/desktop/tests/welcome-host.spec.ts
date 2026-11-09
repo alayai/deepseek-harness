@@ -1,6 +1,6 @@
 /** Native onboarding reuses authenticated Web RPC and never reads credential values. */
 import { describe, expect, it, vi } from 'vitest'
-import { desktopWelcomeBackend } from '../src/welcome-backend.ts'
+import { connectDesktopWelcome } from '../src/welcome-backend.ts'
 
 function transport(preference?: string) {
   const keys = new Map<string, string>()
@@ -9,7 +9,7 @@ function transport(preference?: string) {
     { ns: 'llm-pi-ai', value: { profiles: { example: { apiKeyEnv: 'EXAMPLE_API_KEY' } } } },
     { ns: 'locale', value: preference === undefined ? {} : { preference } },
   ]
-  const send = vi.fn<NonNullable<Parameters<typeof desktopWelcomeBackend>[2]>>(async (_input, init) => {
+  const send = vi.fn<NonNullable<Parameters<typeof connectDesktopWelcome>[2]>>(async (_input, init) => {
     const { rpcId, method, payload } = JSON.parse(init?.body as string) as {
       rpcId: string
       method: string
@@ -34,7 +34,7 @@ const cookie = 'dsh-auth-fixture=owned'
 describe('desktop welcome Web operations', () => {
   it('uses only the current Host cookie and stores only through the configured credential reference', async () => {
     const host = transport()
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     expect(await backend.analyticsEnabled()).toBe(true)
     expect(await backend.save('sk-example')).toEqual({ ok: true })
     expect(host.keys.get('CUSTOM_DEEPSEEK_KEY')).toBe('sk-example')
@@ -42,6 +42,7 @@ describe('desktop welcome Web operations', () => {
     for (const [input, init] of host.send.mock.calls) {
       expect(input).toMatch(/^http:\/\/127\.0\.0\.1:19387\/api\//u)
       expect(init).toMatchObject({ method: 'POST', headers: { cookie }, redirect: 'error' })
+      expect(init).not.toHaveProperty('credentials')
       expect(new URL(input).search).toBe('')
     }
   })
@@ -49,7 +50,7 @@ describe('desktop welcome Web operations', () => {
   it('reads the explicit language preference and recognizes another provider key', async () => {
     const host = transport('zh')
     host.keys.set('EXAMPLE_API_KEY', 'sk-other')
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     expect(await backend.read()).toMatchObject({ localePreference: 'zh', hasApiKey: true })
     host.keys.clear()
     expect(await backend.read()).toMatchObject({ hasApiKey: false })
@@ -58,7 +59,7 @@ describe('desktop welcome Web operations', () => {
 
   it('reads language without querying account or model providers', async () => {
     const host = transport('zh')
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     host.send.mockClear()
     expect(await backend.readLocalePreference()).toBe('zh')
     expect(host.send).toHaveBeenCalledOnce()
@@ -68,7 +69,7 @@ describe('desktop welcome Web operations', () => {
   it('allows profiles without the official provider and retains custom key detection', async () => {
     const host = transport()
     host.namespaces.splice(0, 1)
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     expect(await backend.read()).toMatchObject({ hasApiKey: false, writable: false })
     host.keys.set('EXAMPLE_API_KEY', 'custom-key')
     expect(await backend.read()).toMatchObject({ hasApiKey: true, writable: false })
@@ -78,7 +79,7 @@ describe('desktop welcome Web operations', () => {
 
   it.each(['', 'bad key', 'key\n'])('rejects malformed keys without contacting a provider: %s', async (value) => {
     const host = transport()
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     host.send.mockClear()
     expect(await backend.save(value)).toEqual({ ok: false })
     expect(host.send).not.toHaveBeenCalled()
@@ -86,17 +87,16 @@ describe('desktop welcome Web operations', () => {
 
   it('keeps provider diagnostics out of failures and rejects unmatched RPC envelopes', async () => {
     const host = transport()
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     host.send.mockRejectedValueOnce(new Error('private credential sk-must-not-leak'))
     expect(await backend.save('sk-example')).toEqual({ ok: false })
     host.send.mockResolvedValueOnce(Response.json({ type: 'server-response', rpcId: 'other', result: { ok: true } }))
     await expect(backend.read()).rejects.toThrow('Web RPC failed')
   })
 
-
   it('submits native analytics through authenticated RPC with a bounded request', async () => {
     const host = transport()
-    const backend = desktopWelcomeBackend(url, cookie, host.send)
+    const backend = connectDesktopWelcome(url, cookie, host.send)
     const event = { eventName: 'desktop_app_launch' as const, timestamp: 100, attributes: {} }
     await backend.report(event)
     const [input, init] = host.send.mock.calls.at(-1)!
@@ -107,7 +107,7 @@ describe('desktop welcome Web operations', () => {
   })
 
   it('reports the HTTP status without exposing the Host token, cookie or response body', async () => {
-    const backend = desktopWelcomeBackend(url, cookie, async () => new Response('private response', { status: 431 }))
+    const backend = connectDesktopWelcome(url, cookie, async () => new Response('private response', { status: 431 }))
     await expect(backend.readLocalePreference()).rejects.toThrow(/^desktop welcome: Web request failed \(HTTP 431\)$/u)
   })
 })
