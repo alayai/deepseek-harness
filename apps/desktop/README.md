@@ -214,6 +214,8 @@ Dependency installation does not run the locked Electron package's separate bina
 
 ### Startup onboarding
 
+The shell exchanges the local Host launch token once per Host start. Native onboarding and account monitoring send only the resulting Host cookie, which stays in the main process. Old cookies in Electron’s browser profile do not affect startup.
+
 The API-key input starts empty and uses `autocomplete="new-password"` to ask Chromium not to autofill saved login passwords.
 
 Repeated launches and `dsh://open` keep the workspace hidden until the startup credential check or a welcome action permits entry. Entering from Welcome places keyboard focus on the document without selecting a sidebar control; Tab navigation remains available.

@@ -300,7 +300,6 @@ vi.mock('electron', () => ({
   dialog: harness.dialog,
   shell: { openExternal: harness.openExternal },
   nativeTheme: harness.nativeTheme,
-  net: { fetch: vi.fn() },
   ipcMain: {
     on: harness.ipcOn,
     handle: (channel: string, handler: InvokeHandler) => {
@@ -382,14 +381,14 @@ vi.mock('../src/platform-view.ts', async importOriginal => ({
   },
 }))
 vi.mock('../src/welcome-backend.ts', () => ({
-  connectDesktopWelcome: async () => ({
+  desktopWelcomeBackend: vi.fn(() => ({
     analyticsEnabled: async () => harness.analyticsEnabled,
     report: harness.analytics,
     readLocalePreference: async () => null,
     read: async (): Promise<unknown> => (await harness.hosts.at(-1)!.fetch()).json() as Promise<unknown>,
     save: async () => ({ ok: true }),
     account: { watch: harness.watchAccount, state: async () => ({ status: 'signed-out', attempt: null }) },
-  }),
+  })),
 }))
 
 function configureTestAuthPopup(allow: boolean): void {
@@ -825,6 +824,13 @@ describe('desktop main startup', () => {
       harness.app.removeAllListeners('before-quit')
       rmSync(directory, { recursive: true, force: true })
     }
+  })
+
+  it('starts the welcome backend with the Host cookie without reading the browser session', async () => {
+    const host = await readyForUpdate()
+    await harness.windows[0]!.shown.promise
+    const { desktopWelcomeBackend } = await import('../src/welcome-backend.ts')
+    expect(desktopWelcomeBackend).toHaveBeenCalledExactlyOnceWith(host.url, 'test-cookie')
   })
 
   it('accepts product IPC only from the current application top frame in the owned main window', async () => {

@@ -214,6 +214,8 @@ Web 侧的对应命令是 `pnpm run dev:web` 与 `pnpm run start:web`，见[开�
 
 ### 启动引导
 
+桌面壳在每次 Host 启动时只交换一次本机 Host 启动令牌。原生启动引导和账号状态监听只发送由此取得的 Host Cookie，该 Cookie 保留在主进程中。Electron 浏览器配置中残留的旧 Cookie 不影响启动。
+
 API Key 输入框初始为空，并通过 `autocomplete="new-password"` 请求 Chromium 不要自动填入已保存的登录密码。
 
 重复启动和 `dsh://open` 会保持工作区隐藏，直到启动凭据检查或欢迎页操作允许进入。从 Welcome 进入时，键盘焦点落在文档上，不选中侧边栏控件；Tab 导航仍可使用。
