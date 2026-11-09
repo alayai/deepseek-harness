@@ -78,6 +78,7 @@ export function developmentRuntimeDirectory(
 
 /**
  * Select the output directory and filename suffix for one packaging mode.
+ * DSH_DESKTOP_ARTIFACT_DIR, when set to an absolute directory, replaces the default destination.
  * @param paths Target artifact directories.
  * @param mode Validated packaging mode.
  * @returns Matching artifact destination and filename marker.

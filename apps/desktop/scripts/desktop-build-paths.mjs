@@ -117,12 +117,22 @@ export function developmentRuntimeDirectory(
 
 /**
  * Select the output directory and filename suffix for one packaging mode.
+ * DSH_DESKTOP_ARTIFACT_DIR, when set to an absolute directory, replaces the default destination.
  * @param {{ artifacts: string, unsignedArtifacts: string, unnotarizedArtifacts: string }} paths Target artifact directories.
  * @param {{ unsigned: boolean, skipNotarization: boolean }} mode Validated packaging mode.
  * @returns {{ directory: string, suffix: string }} Matching artifact destination and filename marker.
  */
 export function desktopArtifactOutput(paths, mode) {
-  if (mode.unsigned) return { directory: paths.unsignedArtifacts, suffix: '-unsigned' }
-  if (mode.skipNotarization) return { directory: paths.unnotarizedArtifacts, suffix: '-unnotarized' }
-  return { directory: paths.artifacts, suffix: '' }
+  const selected = mode.unsigned
+    ? { directory: paths.unsignedArtifacts, suffix: '-unsigned' }
+    : mode.skipNotarization
+      ? { directory: paths.unnotarizedArtifacts, suffix: '-unnotarized' }
+      : { directory: paths.artifacts, suffix: '' }
+  // Opt-in so a new local package can land beside an existing unsigned tree.
+  const override = process.env.DSH_DESKTOP_ARTIFACT_DIR
+  if (override === undefined || override === '') return selected
+  if (!override.trim() || !isAbsolute(override) || override.includes('\0')) {
+    throw new Error('desktop package: DSH_DESKTOP_ARTIFACT_DIR must be a nonempty absolute directory')
+  }
+  return { directory: override, suffix: selected.suffix }
 }
