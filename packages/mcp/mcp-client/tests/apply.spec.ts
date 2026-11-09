@@ -242,6 +242,8 @@ describe('apply (plugin lifecycle)', () => {
       headers: { 'x-api-key': 'fixed' },
       authProvider,
       toolCallTimeoutMs: 60_000,
+      closeTimeoutMs: 5_000,
+      expandTemplates: false,
       failOnStartupError: true,
     })
     expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
@@ -258,6 +260,8 @@ describe('apply (plugin lifecycle)', () => {
       headers: {},
       authProvider: {} as never,
       toolCallTimeoutMs: 60_000,
+      closeTimeoutMs: 5_000,
+      expandTemplates: false,
       failOnStartupError: true,
     })).rejects.toThrow('supplied programmatically')
     expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
@@ -271,6 +275,8 @@ describe('apply (plugin lifecycle)', () => {
       headers: {},
       authProvider: { tokens() {}, clientInformation() {} } as never,
       toolCallTimeoutMs: 60_000,
+      closeTimeoutMs: 5_000,
+      expandTemplates: false,
       failOnStartupError: true,
     })).rejects.toThrow('supplied programmatically')
     expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
