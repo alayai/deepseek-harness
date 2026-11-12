@@ -312,7 +312,12 @@ export class BasicCompactionEngine extends CompactionEngine {
     }
   }
 
-  /** Price the proposed header; switch checks require history below its threshold. */
+  /**
+   * Price the proposed header. A switch must fit the destination message
+   * budget (window minus reserved output). The lower pressure threshold is
+   * when condensation is attempted, not a second admission limit: a prompt
+   * that still fits is accepted when no safe span can be summarized.
+   */
   private async compactPressure(
     agent: Agent,
     header: EpochHeader,
@@ -334,11 +339,15 @@ export class BasicCompactionEngine extends CompactionEngine {
         + 'configure contextWindow on that adapter model',
       )
     }
+    const reserved = reservedCompletionTokens(header, info.defaultMaxTokens)
     const spec = resolveCompactSpec(
       policy,
       info.context.contextWindow,
-      reservedCompletionTokens(header, info.defaultMaxTokens),
+      reserved,
     )
+    // Output reservation is already removed; headroom is only the condensation
+    // trigger. `resolveCompactSpec` rejects a non-positive budget before this.
+    const messageBudgetTokens = info.context.contextWindow - reserved
     if (measurement.totalTokens < spec.thresholdTokens) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
@@ -353,6 +362,11 @@ export class BasicCompactionEngine extends CompactionEngine {
     for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
       const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
       if (range === null) {
+        // System prompt and tool definitions are outside every compactable
+        // span. A short transcript on a large catalog can sit above the
+        // headroom-reduced threshold with nothing safe to summarize, while
+        // the prompt still fits the destination window.
+        if (requireBelowThreshold && measurement.totalTokens <= messageBudgetTokens) return result
         if (result === null && !requireBelowThreshold) return null
         throw new Error(
           'no safe compaction range can reduce context below threshold '

@@ -1875,6 +1875,45 @@ describe('model-switch pressure', () => {
     expect(adapter.lastOptions).toBeUndefined()
   })
 
+  it('accepts a fitting switch when headroom leaves no compactable span', async () => {
+    // Window 1_000, output reserve 400, headroom 200: pressure threshold is 400
+    // and the message budget is 600. One message in between fits, and retaining
+    // it leaves no span to summarize. The switch must proceed.
+    const { ctx, adapter } = harness({ headroomTokens: 200 })
+    ctx.llm.registerAdapter(['wide'], new ContextAdapter(1_000))
+    const session = Session.create(SessionId('fits-without-range'))
+    session.append('request/header', { header: { config: { provider: MODEL, model: MODEL } }, reason: 'initial' })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'x'.repeat(1_800) }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const selected = { provider: 'wide', model: 'wide', maxTokens: 400 }
+    const priced = ctx.tokenMeter.measure(session, { config: selected })
+    expect(priced.totalTokens).toBeGreaterThan(400)
+    expect(priced.totalTokens).toBeLessThanOrEqual(600)
+
+    await expect(request(ctx, session, selected)).resolves.toEqual(selected)
+    expect(adapter.lastOptions).toBeUndefined()
+    expect(session.requestHeader()?.config).toEqual({ provider: MODEL, model: MODEL })
+  })
+
+  it('still rejects a switch that does not fit when nothing can be compacted', async () => {
+    const { ctx, adapter } = harness({ headroomTokens: 200 })
+    ctx.llm.registerAdapter(['wide'], new ContextAdapter(1_000))
+    const session = Session.create(SessionId('overflow-without-range'))
+    session.append('request/header', { header: { config: { provider: MODEL, model: MODEL } }, reason: 'initial' })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'x'.repeat(2_600) }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const selected = { provider: 'wide', model: 'wide', maxTokens: 400 }
+    const priced = ctx.tokenMeter.measure(session, { config: selected })
+    expect(priced.totalTokens).toBeGreaterThan(600)
+
+    const switching = request(ctx, session, selected)
+    await expect(switching).rejects.toMatchObject({ code: 'MODEL_SWITCH_COMPACTION_FAILED' })
+    await expect(switching).rejects.toThrow('no safe compaction range')
+    expect(adapter.lastOptions).toBeUndefined()
+  })
+
   it('reports a non-Error capacity failure without changing the route', async () => {
     const { ctx } = harness()
     vi.spyOn(ctx.llm, 'resolveModelInfo').mockRejectedValueOnce('capacity lookup unavailable')
