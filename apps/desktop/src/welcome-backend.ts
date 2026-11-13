@@ -34,6 +34,23 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Boot reads the language preference while plugins are still opening sockets. */
+const LOCALE_READ_ATTEMPTS = 5
+const LOCALE_READ_DELAYS_MS = [0, 400, 800, 1_600, 3_200]
+
+/**
+ * A reset or refused loopback connection is retried. HTTP and RPC failures are not.
+ * @param error - Rejection from the Host fetch.
+ * @returns Whether another attempt can still reach the same Host.
+ */
+function transientNetworkError(error: unknown): boolean {
+  if (!(error instanceof TypeError) || error.message !== 'fetch failed') return false
+  const cause = error.cause
+  if (!(cause instanceof Error)) return true
+  const code = 'code' in cause && typeof cause.code === 'string' ? cause.code : ''
+  return code === '' || /^(?:ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN|UND_ERR_)/u.test(code)
+}
+
 /**
  * Connect the native HTTP client to the Desktop Host; every request sends `cookie` explicitly and uses no cookie jar.
  * @param hostUrl - URL of the running Desktop Host; only its origin is used.
@@ -131,9 +148,20 @@ export function connectDesktopWelcome(
     },
     async report(event) { await invoke({ namespace: 'productAnalytics', method: 'report', args: { event } }, AbortSignal.timeout(1000)) },
     async readLocalePreference() {
-      const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
-      if (!record(settings) || !Array.isArray(settings.namespaces)) throw new Error('desktop welcome: missing settings namespaces')
-      return localePreference(settings.namespaces)
+      let last: unknown
+      for (let attempt = 0; attempt < LOCALE_READ_ATTEMPTS; attempt++) {
+        const delay = LOCALE_READ_DELAYS_MS[attempt] ?? 0
+        if (delay > 0) await new Promise((resolve) => { setTimeout(resolve, delay) })
+        try {
+          const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
+          if (!record(settings) || !Array.isArray(settings.namespaces)) throw new Error('desktop welcome: missing settings namespaces')
+          return localePreference(settings.namespaces)
+        } catch (error) {
+          last = error
+          if (!transientNetworkError(error) || attempt === LOCALE_READ_ATTEMPTS - 1) throw error
+        }
+      }
+      throw last
     },
     async save(apiKey) {
       if (!/^[\x21-\x7e]+$/.test(apiKey)) return { ok: false }

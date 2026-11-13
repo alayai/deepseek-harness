@@ -110,4 +110,19 @@ describe('desktop welcome Web operations', () => {
     const backend = connectDesktopWelcome(url, cookie, async () => new Response('private response', { status: 431 }))
     await expect(backend.readLocalePreference()).rejects.toThrow(/^desktop welcome: Web request failed \(HTTP 431\)$/u)
   })
+
+  it('retries a reset loopback connection and then reads the language preference', async () => {
+    const host = transport('zh')
+    let remaining = 2
+    const send: NonNullable<Parameters<typeof connectDesktopWelcome>[2]> = async (input, init) => {
+      if (remaining > 0) {
+        remaining--
+        throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+      }
+      return host.send(input, init)
+    }
+    const backend = connectDesktopWelcome(url, cookie, send)
+    expect(await backend.readLocalePreference()).toBe('zh')
+    expect(remaining).toBe(0)
+  })
 })
