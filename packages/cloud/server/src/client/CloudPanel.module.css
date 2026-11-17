@@ -1,0 +1,15 @@
+.entry { position: fixed; right: 20px; bottom: 16px; pointer-events: auto; }
+.dialog { max-height: 100%; width: min(1100px, calc(100vw - 48px)); max-width: none; }
+.body { max-height: 70dvh; overflow: auto; padding-right: 4px; }
+.group { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+.section { display: grid; gap: 12px; padding: 20px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l4); }
+.section h3 { margin: 0; font-size: 15px; font-weight: 500; }
+.field { display: grid; gap: 6px; flex: 1; min-width: min(220px, 100%); font-size: 13px; }
+.field input, .field select, .field textarea { box-sizing: border-box; width: 100%; min-height: 36px; padding: 8px 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; font: inherit; }
+.field textarea { min-height: 90px; resize: vertical; }
+.notice { min-height: 20px; font-size: 13px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.error { color: var(--dsw-alias-state-error-primary); }
+.output { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.image { display: block; max-width: 100%; height: auto; }
+.row { display: flex; gap: 12px; align-items: center; justify-content: space-between; overflow-wrap: anywhere; }
+.locked { pointer-events: auto; }

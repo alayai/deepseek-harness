@@ -1119,6 +1119,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'dshCloud',
+    summary: 'Own cloud authority separately from DeepSeek platform accounts and local Session controllers.',
+    description: 'Own cloud authority separately from DeepSeek platform accounts and local Session controllers.',
+    methods: [
+      {
+        signature: '@Remote state(): CloudSnapshot',
+        description: 'Read the target and pending authorization URL; never returns access or refresh tokens.',
+        parameters: [],
+        returns: 'display-safe target state.',
+      },
+      {
+        signature: '@Remote beginLogin(serverUrl: string): CloudSnapshot',
+        description: 'Block local execution before any asynchronous work, then begin native PKCE.',
+        parameters: [{ name: 'serverUrl', description: 'HTTPS server origin, or an HTTP loopback development origin.' }],
+        returns: 'reserved authentication state.',
+      },
+      {
+        signature: '@Remote async request(input: CloudRequest): Promise<CloudValue>',
+        description: 'Execute one explicit server-v1 request for the displayed generation.',
+        parameters: [{ name: 'input', description: 'bounded API request with the displayed epoch.' }],
+        returns: 'bounded server business data; failures retain no credentials.',
+      },
+      {
+        signature: '@Remote async logout(): Promise<CloudSnapshot>',
+        description: 'Revoke cloud login and settle client continuations before enabling local execution.',
+        parameters: [],
+        returns: 'local state after revocation or known expiry; failure keeps local blocked.',
+      },
+    ],
+  },
+  {
     key: 'fileReferences',
     summary: 'Host capability for cancellable file-reference discovery.',
     description: 'Host capability for cancellable file-reference discovery.',
@@ -4225,6 +4256,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Resolve strict generated definitions or conservative SRC markers against current Cordis Services and Typert providers.',
     methods: [
       {
+        signature: 'async drain(matches: (request: InvokeRemoteRequest) => boolean, signal: AbortSignal): Promise<void>',
+        description: 'Cancel admitted calls after the policy owner has closed new admission.',
+        parameters: [{ name: 'matches', description: 'selects the admitted requests whose work must settle.' }, { name: 'signal', description: 'deadline or cancellation for the wait; does not claim unfinished cleanup completed.' }],
+      },
+      {
+        signature: 'guard(check: (request: InvokeRemoteRequest) => void): () => void',
+        description: 'Register a fiber-owned admission check shared by unary and stream carriers.',
+        parameters: [{ name: 'check', description: 'synchronous policy; throw to refuse the request before business execution.' }],
+        returns: 'disposer removing this policy.',
+      },
+      {
         signature: 'readonly wireStream: TypertGatewayWireStream = { open: (endpoint, payload, uplink, peer, signal) => this.openWireStream(endpoint, payload, uplink, peer, signal, new AbortController()), failure: error => rpcError(error), }',
         description: 'Carrier adapter shared by the WebSocket mux and local Host transports.',
         parameters: [],
@@ -5858,6 +5900,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ClientArtifactBaseline',
     declaration: 'export interface ClientArtifactBaseline {\n    readonly path: string;\n    readonly mtimeMs: number;\n    readonly ctimeMs: number;\n    readonly size: number;\n}',
+  },
+  {
+    name: 'CloudRequest',
+    declaration: 'export interface CloudRequest {\n    readonly epoch: number;\n    readonly path: string;\n    readonly method: \'GET\' | \'POST\' | \'PATCH\' | \'PUT\' | \'DELETE\';\n    readonly body: CloudValue;\n    readonly idempotencyKey: string | null;\n}',
+  },
+  {
+    name: 'CloudSnapshot',
+    declaration: 'export interface CloudSnapshot {\n    readonly mode: \'local\' | \'authenticating\' | \'cloud\' | \'cloud-suspended\';\n    readonly epoch: number;\n    readonly serverUrl: string;\n    readonly authorizationUrl: string | null;\n    readonly error: string | null;\n}',
+  },
+  {
+    name: 'CloudValue',
+    declaration: 'export type CloudValue = null | boolean | number | string | CloudValue[] | {\n    [key: string]: CloudValue;\n};',
   },
   {
     name: 'CollectedOutput',

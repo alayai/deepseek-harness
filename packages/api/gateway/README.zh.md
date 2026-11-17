@@ -36,6 +36,8 @@ Connection 可用时，Host 入口会在 Connection 共享的 `/api` FetchHandle
 
 `getPendingRemoteEvents()` 按到达顺序返回当前未结算转发事件的独立元数据，仅含事件名和 Agent ID。它不暴露请求正文，不改变事件生命周期，也不提供变化通知。
 
+`guard(check)` 为单次调用与流调用安装由 fiber 拥有的准入策略，包括所有者调用；检查发生在异步解析前后以及业务执行前。策略所有者必须先关闭新的准入，再调用 `drain(matches, signal)`；后者中止匹配的已准入调用并等待清理。超过期限会拒绝排空，而不会宣称清理完成。Gateway 拥有的 `$events` 基础设施不参与排空。如果消费者既不推进也不关闭某个流，该流可能让排空一直等待到期限。
+
 支持取消的 Remote 方法会把 `signal: AbortSignal` 声明为最后一个 Host 参数。signal 是 descriptor 元数据，而不是 wire 参数：Connection 将它提供给 Gateway，Gateway 则在已解码的业务参数之后注入它。SRC 识别这个保留的末位参数名，严格生成还要求它具有全局 `AbortSignal` 类型。
 
 流式 Remote 使用 `@Remote({ mode: 'stream' })` 并返回 `Iterable` 或 `AsyncIterable`。`ctx.typertGateway.stream()` 执行与一元调用相同的 endpoint、参数、lookup 和取消校验，再返回可取消的业务项 iterable。Client 插件激活时打开 Gateway 自有的 `/api/remote.mux` WebSocket，并让它在空闲时保持连接。Connection 拥有重试调度；每次 retry 前，它要求 mux 取消候选或活动 socket，并且只做一次全新的物理连接尝试。Host 按配置的 `websocketHeartbeatIntervalMs` 间隔（默认 2 秒）发送 Ping 控制帧，浏览器在 WebSocket 协议层自动回复 Pong，使空闲网络中间层持续看到流量，而不新增 Remote 流帧。Pong、收到的任意帧，或未一次性完成的下行写入，都视为对端活动；默认 `'deflate'` 下，JSON 文本达到压缩阈值的帧异步 deflate，因此其完成总是计入。连续两个 Ping 间隔没有活动的 socket 会被终止，因此 Pong 被数据阻塞在拥塞链路上时连接仍会保持。`websocketCompression` 保持默认的 `'deflate'` 时，携带 `permessage-deflate` 的升级会协商该扩展，Host 压缩自己发出的、JSON 文本达到 1024 个字符 的帧；更短的帧不压缩，上行帧是否压缩由对端决定，设为 `'none'` 时接受同样的升级但不带该扩展。可独立取消的逻辑流共享这条连接；进程内 Connection 载体直接提供等价的流，不打开该 WebSocket。

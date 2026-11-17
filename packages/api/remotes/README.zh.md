@@ -89,4 +89,4 @@ Host entry 为每条 Client 流独立注册一组 allowlist listener 和一个�
 
 </details>
 
-客户端组装包含 account 命名空间，用于登录操作和可重连的账号快照。
+客户端组装包含用于平台登录的 account 命名空间，以及独立的 `dshCloud` 命名空间，后者负责 dsh-server 认证、执行目标状态和云端请求。

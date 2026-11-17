@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`cloud workspace UI > keeps the local UI blocked in authenticating 1`] = `"等待云端登录"`;
+
+exports[`cloud workspace UI > keeps the local UI blocked in cloud-suspended 1`] = `"本地操作保持暂停，请重新登录或明确退出云端"`;

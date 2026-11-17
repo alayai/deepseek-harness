@@ -437,15 +437,32 @@ type TypertGatewayErrorCode =
 ```ts type-equiv
 /** Host dispatcher consumed by Connection adapters. */
 interface TypertGateway {
+  /**
+   * Register synchronous admission policy before lookup and immediately before execution.
+   * @param check - synchronous policy; throw to refuse the request.
+   * @returns disposer removing this policy.
+   */
+  guard(check: (request: InvokeRemoteRequest) => void): () => void
+
+  /**
+   * Cancel matching admitted calls and await their cleanup; caller must first prevent new admissions.
+   * @param matches - selects the admitted requests whose work must settle.
+   * @param signal - deadline or cancellation for the wait.
+   */
+  drain(matches: (request: InvokeRemoteRequest) => boolean, signal: AbortSignal): Promise<void>
+
   /** Carrier adapter shared by WebSocket and in-process transports. */
   readonly wireStream: TypertGatewayWireStream
+
   /**
    * Check for an active owner Client event stream, the only kind that can answer forwarded waterfalls.
    * @returns whether an owner stream is open and has not been cancelled.
    */
   hasLiveClient(): boolean
+
   /** @returns detached metadata for all unsettled forwarded events in arrival order. */
   getPendingRemoteEvents(): readonly PendingRemoteEventInfo[]
+
   /**
    * Register the application-selected forwarded-event source.
    * @param source - stream factory installed by the Remote assembly.
@@ -456,6 +473,7 @@ interface TypertGateway {
     source: TypertRemoteEventSource,
     host: RemoteEventHostInfo,
   ): () => Promise<void>
+
   /**
    * Invoke one live Remote method without assuming a carrier or response envelope.
    * @param request - decoded endpoint and named wire arguments.
@@ -463,6 +481,7 @@ interface TypertGateway {
    * @throws {@link TypertGatewayError} for dispatch, provider, or boundary failures; lookup-policy and business errors retain identity.
    */
   invoke(request: InvokeRemoteRequest): Promise<unknown>
+
   /**
    * Open one live stream Remote method without assuming a physical carrier.
    * @param request - decoded endpoint, named wire arguments, and the Client uplink when the carrier has one.
@@ -660,6 +679,20 @@ Source: [`packages/typert/registry/src/service.ts`](../../packages/typert/regist
 Resolve strict generated definitions or conservative SRC markers against current Cordis Services and Typert providers.
 
 ```ts cordis-catalog
+/**
+ * Cancel admitted calls after the policy owner has closed new admission.
+ * @param matches - selects the admitted requests whose work must settle.
+ * @param signal - deadline or cancellation for the wait; does not claim unfinished cleanup completed.
+ */
+async drain(matches: (request: InvokeRemoteRequest) => boolean, signal: AbortSignal): Promise<void>
+
+/**
+ * Register a fiber-owned admission check shared by unary and stream carriers.
+ * @param check - synchronous policy; throw to refuse the request before business execution.
+ * @returns disposer removing this policy.
+ */
+guard(check: (request: InvokeRemoteRequest) => void): () => void
+
 /**
  * Check for an active owner Client event stream, the only kind that can answer forwarded waterfalls.
  * @returns whether an owner stream is open and has not been cancelled.

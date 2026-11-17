@@ -148,6 +148,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   tools: 'tools.md',
   typert: 'typert.md',
   typertGateway: 'typert.md',
+  dshCloud: 'cloud.md',
   remoteAccess: 'typert.md',
   userQuestions: 'user-questions.md',
   web: 'web.md',
@@ -302,6 +303,9 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  CloudSnapshot: 'cloud.md',
+  CloudRequest: 'cloud.md',
+  CloudValue: 'cloud.md',
   Principal: 'typert.md',
   PrincipalMap: 'typert.md',
   RemoteAccessResource: 'typert.md',

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context, Service, symbols } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import { apply as applyConnection, inject as connectionInject } from '@deepseek-ai/dsh-client-connection'
@@ -399,6 +399,56 @@ class InheritedMethodBase extends Service {
 class InheritedMethodService extends InheritedMethodBase {}
 
 describe('TypertGatewayService', () => {
+  it('enforces fiber-owned admission for owner calls before lookup and removes it on disposal', async () => {
+    const { ctx, service } = await setup()
+    const guard = ctx.plugin({ inject: ['typertGateway'], apply(scope) {
+      scope.typertGateway.guard(() => { throw new RemoteError('remote-access/denied', 'paused', { action: 'goals/passthrough', reason: 'no-allow' }) })
+    } })
+    await guard
+    const request = { peer: ownerPeer(ctx), namespace: 'goals', method: 'passthrough', args: { value: 'blocked' } }
+    await expect(ctx.typertGateway.invoke(request)).rejects.toMatchObject({ code: 'remote-access/denied' })
+    expect(service.calls).toEqual([])
+    await guard.dispose()
+    await expect(ctx.typertGateway.invoke(request)).resolves.toBe('blocked')
+    await ctx.fiber.dispose()
+  })
+
+  it('drain aborts admitted unary work and waits for its cleanup before resolving', async () => {
+    const { ctx, service } = await setup()
+    registerAgentLookup(ctx, { id: 'agent-1' })
+    ctx.typertGateway.guard(() => {})
+    const entered = Promise.withResolvers<undefined>(), cleanup = Promise.withResolvers<undefined>()
+    vi.spyOn(service, 'create').mockImplementation(async (_agent, _request, signal) => {
+      entered.resolve(undefined)
+      await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+      await cleanup.promise
+      return 'settled'
+    })
+    const call = ctx.typertGateway.invoke({ peer: ownerPeer(ctx), namespace: 'goals', method: 'create', args: { agentId: 'agent-1', request: { title: 'drain' } } })
+    await entered.promise
+    let drained = false
+    const drain = ctx.typertGateway.drain(() => true, AbortSignal.timeout(2000)).then(() => { drained = true })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    cleanup.resolve(undefined)
+    await call
+    await drain
+    expect(drained).toBe(true)
+    await ctx.fiber.dispose()
+  })
+
+  it('rechecks admission after an asynchronous lookup changes the target', async () => {
+    const { ctx, service } = await setup()
+    const agent = { id: 'agent-1' }
+    registerAgentLookup(ctx, agent)
+    registerStrict(ctx, [createDescriptor()])
+    let checks = 0
+    ctx.typertGateway.guard(() => { if (++checks >= 3) throw new Error('target changed during lookup') })
+    await expect(ctx.typertGateway.invoke({ peer: ownerPeer(ctx), namespace: 'goals', method: 'create', args: { agentId: agent.id, request: { title: 'blocked' } } })).rejects.toThrow('target changed during lookup')
+    expect(service.calls).toEqual([])
+    await ctx.fiber.dispose()
+  })
+
   it('invokes a strict direct method with schema decoding and a live lookup', async () => {
     const { ctx, service } = await setup()
     const agent = { id: 'agent-1' }

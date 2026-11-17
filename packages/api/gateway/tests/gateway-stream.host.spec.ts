@@ -343,6 +343,22 @@ afterEach(async () => {
 })
 
 describe('Typert Remote streams', () => {
+  it('guards stream admission and drains active stream cleanup', async () => {
+    const { ctx, service } = await setup(false)
+    let blocked = false
+    ctx.typertGateway.guard(() => { if (blocked) throw new Error('cloud target selected') })
+    const source = await ctx.typertGateway.stream({ peer: ownerPeer(ctx), namespace: 'feed', method: 'follow', args: { label: 'local' } })
+    const iterator = source[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toMatchObject({ value: 'local:ready' })
+    const next = iterator.next()
+    const cancelled = expect(next).rejects.toMatchObject({ code: 'gateway/cancelled' })
+    blocked = true
+    await expect(ctx.typertGateway.stream({ peer: ownerPeer(ctx), namespace: 'feed', method: 'follow', args: { label: 'blocked' } })).rejects.toThrow('cloud target selected')
+    await ctx.typertGateway.drain(() => true, AbortSignal.timeout(2000))
+    await cancelled
+    expect(service.returns).toBe(1)
+  })
+
   it('reports Client event streams without counting a bare WebSocket', async () => {
     const { ctx } = await setup(true)
     const source = new RemoteEventSourceProbe()

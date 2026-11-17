@@ -152,6 +152,20 @@ export interface PendingRemoteEventInfo {
 
 /** Host dispatcher consumed by Connection adapters. */
 export interface TypertGateway {
+  /**
+   * Register synchronous admission policy before lookup and immediately before execution.
+   * @param check - synchronous policy; throw to refuse the request.
+   * @returns disposer removing this policy.
+   */
+  guard(check: (request: InvokeRemoteRequest) => void): () => void
+
+  /**
+   * Cancel matching admitted calls and await their cleanup; caller must first prevent new admissions.
+   * @param matches - selects the admitted requests whose work must settle.
+   * @param signal - deadline or cancellation for the wait.
+   */
+  drain(matches: (request: InvokeRemoteRequest) => boolean, signal: AbortSignal): Promise<void>
+
   /** Carrier adapter shared by WebSocket and in-process transports. */
   readonly wireStream: TypertGatewayWireStream
 

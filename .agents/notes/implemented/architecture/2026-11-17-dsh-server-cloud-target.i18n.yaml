@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-17-dsh-server-cloud-target.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-17-dsh-server-cloud-target.md
+/agent-note-host-owned-dsh-server-cloud-target:
+  en: 64417659129e2c77
+  zh: c73430a77f9ec42e
+/agent-note-host-owned-dsh-server-cloud-target/problem:
+  en: 78d15dc94c522e28
+  zh: c271f714db63dfe1
+/agent-note-host-owned-dsh-server-cloud-target/decision:
+  en: 60effcce25ef50ca
+  zh: 0e06032cc10811df
+/agent-note-host-owned-dsh-server-cloud-target/alternatives-considered:
+  en: 519536f08ef789d6
+  zh: 656ac70dfb71571b
+/agent-note-host-owned-dsh-server-cloud-target/consequences:
+  en: 5ad0b38cb5155941
+  zh: 99bdf502554c9323
+/agent-note-host-owned-dsh-server-cloud-target/verification:
+  en: 1a89ee37d27b1327
+  zh: 65bf7757c4193970

@@ -89,4 +89,4 @@ None.
 
 </details>
 
-The Client assembly includes the account namespace for login commands and reconnectable account snapshots.
+The Client assembly includes the account namespace for platform login and the independent `dshCloud` namespace for dsh-server authentication, target state, and cloud requests.

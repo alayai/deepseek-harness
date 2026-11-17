@@ -95,6 +95,7 @@ interface ResolvedBinding {
 }
 
 interface PreparedInvocation {
+  readonly request: InvokeRemoteRequest
   readonly endpoint: string
   readonly descriptor: InvocationDescriptor
   /** Service view bound to a Context carrying `invocation`, so the method reads it as `this.ctx.invocation`. */
@@ -212,6 +213,53 @@ export class TypertGatewayError extends RemoteError<TypertGatewayErrorCode> {
  * @typert service typertGateway
  */
 export class TypertGatewayService extends Service implements TypertGateway {
+  private readonly admissionGuards = new Set<(request: InvokeRemoteRequest) => void>()
+  private readonly admitted = new Set<{
+    request: InvokeRemoteRequest
+    control: AbortController
+    done: Promise<void>
+  }>()
+
+  /**
+   * Cancel admitted calls after the policy owner has closed new admission.
+   * @param matches - selects the admitted requests whose work must settle.
+   * @param signal - deadline or cancellation for the wait; does not claim unfinished cleanup completed.
+   */
+  async drain(matches: (request: InvokeRemoteRequest) => boolean, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
+    const selected = [...this.admitted].filter(item => matches(item.request))
+    for (const item of selected) item.control.abort()
+    const cancelled = Promise.withResolvers<never>()
+    const abort = (): void => { cancelled.reject(signal.reason) }
+    signal.addEventListener('abort', abort, { once: true })
+    try { await Promise.race([Promise.all(selected.map(item => item.done)), cancelled.promise]) }
+    finally { signal.removeEventListener('abort', abort) }
+  }
+
+  private admit(request: InvokeRemoteRequest, control: AbortController): () => void {
+    this.checkAdmission(request)
+    const completion = Promise.withResolvers<void>()
+    const item = { request, control, done: completion.promise }
+    this.admitted.add(item)
+    return () => { this.admitted.delete(item); completion.resolve() }
+  }
+
+  /**
+   * Register a fiber-owned admission check shared by unary and stream carriers.
+   * @param check - synchronous policy; throw to refuse the request before business execution.
+   * @returns disposer removing this policy.
+   */
+  guard(check: (request: InvokeRemoteRequest) => void): () => void {
+    const dispose = this.ctx.effect(() => {
+      this.admissionGuards.add(check)
+      return () => { this.admissionGuards.delete(check) }
+    }, 'gateway.admissionGuard')
+    return () => { void dispose() }
+  }
+
+  private checkAdmission(request: InvokeRemoteRequest): void {
+    for (const check of this.admissionGuards) check(request)
+  }
   static inject = ['typert', 'remoteAccess']
   static Config: z<Config> = z.object({
     websocketHeartbeatIntervalMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS)
@@ -422,7 +470,14 @@ export class TypertGatewayService extends Service implements TypertGateway {
    * @throws {@link TypertGatewayError} for dispatch, provider, or boundary failures; lookup-policy and business errors retain identity.
    */
   async invoke(request: InvokeRemoteRequest): Promise<unknown> {
-    return this.invokePrepared(await this.prepareInvocation(request, new AbortController()))
+    const control = new AbortController()
+    const release = this.admit(request, control)
+    const signal = this.admissionGuards.size === 0 ? request.signal
+      : request.signal === undefined ? control.signal : AbortSignal.any([request.signal, control.signal])
+    try {
+      return await this.invokePrepared(await this.prepareInvocation({ ...request, ...signal === undefined ? {} : { signal } }, control))
+    }
+    finally { release() }
   }
 
   private async invokePrepared(prepared: PreparedInvocation): Promise<unknown> {
@@ -435,6 +490,8 @@ export class TypertGatewayService extends Service implements TypertGateway {
     }
 
     try {
+      this.checkAdmission(prepared.request)
+      if (this.admissionGuards.size > 0) prepared.invocation.signal.throwIfAborted()
       return await Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
     } catch (error) {
       if (prepared.invocation.signal.aborted) throw remoteCancelled(prepared.endpoint, error)
@@ -459,6 +516,16 @@ export class TypertGatewayService extends Service implements TypertGateway {
    * with the Remote failure as the reason so the carrier delivers that failure.
    */
   private async openStream(request: InvokeRemoteRequest, control: AbortController): Promise<AsyncIterable<unknown>> {
+    const release = this.admit(request, control)
+    try { return await this.openAdmittedStream(request, control, release) }
+    catch (error) { release(); throw error }
+  }
+
+  private async openAdmittedStream(
+    request: InvokeRemoteRequest,
+    control: AbortController,
+    release: () => void,
+  ): Promise<AsyncIterable<unknown>> {
     const prepared = await this.prepareInvocation(request, control)
     if (prepared.descriptor.mode === undefined) {
       await prepared.invocation.close()
@@ -470,6 +537,8 @@ export class TypertGatewayService extends Service implements TypertGateway {
     }
     let source: unknown
     try {
+      this.checkAdmission(prepared.request)
+      if (this.admissionGuards.size > 0) prepared.invocation.signal.throwIfAborted()
       source = Reflect.apply(prepared.method, prepared.receiver, prepared.args) as unknown
     } catch (error) {
       await prepared.invocation.close()
@@ -485,7 +554,10 @@ export class TypertGatewayService extends Service implements TypertGateway {
         { field: 'result' },
       )
     }
-    return cancellableStream(source, prepared.endpoint, prepared.invocation)
+    return (async function* () {
+      try { yield* cancellableStream(source, prepared.endpoint, prepared.invocation) }
+      finally { release() }
+    })()
   }
 
   private async dispatchRpc(
@@ -796,6 +868,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
   ): Promise<PreparedInvocation> {
     const endpoint = endpointOf(request.namespace, request.method)
     assertPeerLive(request.peer, endpoint)
+    this.checkAdmission(request)
     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
     assertExactArguments(request.args, descriptor, endpoint)
     const validated = validateArguments(descriptor, request.args, endpoint)
@@ -865,7 +938,10 @@ export class TypertGatewayService extends Service implements TypertGateway {
         `active Service ${JSON.stringify(descriptor.service)} has no callable method ${JSON.stringify(implementation)}`,
       )
     }
+    // Lookup and Context resolution can yield while application policy changes.
+    this.checkAdmission(request)
     return {
+      request,
       endpoint,
       descriptor,
       receiver: callReceiver,

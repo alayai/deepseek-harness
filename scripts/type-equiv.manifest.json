@@ -2781,6 +2781,21 @@
       "doc": "docs/subsystems/forge.md",
       "symbol": "ForgeReviewResult",
       "source": "packages/experimental/forge/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/cloud.md",
+      "symbol": "CloudSnapshot",
+      "source": "packages/cloud/server/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/cloud.md",
+      "symbol": "CloudValue",
+      "source": "packages/cloud/server/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/cloud.md",
+      "symbol": "CloudRequest",
+      "source": "packages/cloud/server/src/types.ts"
     }
   ]
 }
