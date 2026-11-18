@@ -1,36 +1,37 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { CloudPanel, type CloudPanelProps } from '../src/client/CloudPanel.tsx'
 import { zh } from '../src/client/locales.ts'
-import type { CloudSnapshot } from '../src/types.ts'
+import type { CloudSnapshot, CloudValue } from '../src/types.ts'
+import { createCloudViewStore } from '../src/client/view-store.ts'
+import { createCloudActivities } from '../src/client/activity.ts'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 function props(mode: CloudSnapshot['mode'] = 'local', epoch = 8): CloudPanelProps {
   const snapshot: CloudSnapshot = { mode, epoch, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null }
-  const input: Pick<CloudPanelProps, 't' | 'useCloud' | 'login' | 'logout' | 'call'> = {
+  const store = createCloudViewStore(), activities = createCloudActivities()
+  const input: CloudPanelProps = {
+    useView: bindSnapshotSelector(store), viewActions: store.actions,
+    useActivities: bindSnapshotSelector(activities.source), remember: activities.remember, accepted: activities.accepted,
     t: makeTranslate(zh), useCloud: <T,>(select: (value: CloudSnapshot) => T) => select(snapshot),
-    login: vi.fn(async () => {}), logout: vi.fn(async () => {}), call: vi.fn(async () => null),
+    readLocal: vi.fn(async () => ({ kind: 'sessions' as const, items: [], nextOffset: null })), login: vi.fn(async () => {}), logout: vi.fn(async () => {}), call: vi.fn(async () => null),
   }
-  return input as CloudPanelProps
+  return input
 }
 
 describe('cloud workspace UI', () => {
-  it('leaves the local application usable until the user opens cloud login', () => {
+  it('renders session-free login without a modal or local execution controls', () => {
     render(<CloudPanel {...props()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /DSH 云端/ }))
     expect(screen.getByRole('button', { name: '登录 dsh-server' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('textbox', { name: '云端命令' })).toBeNull()
   })
-  it.each(['authenticating', 'cloud-suspended'] as const)('keeps the local UI blocked in %s', (mode) => {
+  it.each(['authenticating', 'cloud-suspended'] as const)('keeps execution paused without covering the application in %s', (mode) => {
     render(<CloudPanel {...props(mode)} />)
-    expect(screen.getByRole('dialog')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toMatchSnapshot()
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getAllByRole('status')[0]?.textContent).toMatchSnapshot()
     expect(screen.queryByRole('textbox', { name: '云端命令' })).toBeNull()
     expect(screen.getByRole('button', { name: '退出云端并返回本地' })).toBeTruthy()
   })
@@ -38,10 +39,10 @@ describe('cloud workspace UI', () => {
     const input = props('cloud')
     vi.mocked(input.call).mockRejectedValue(new Error('offline'))
     render(<CloudPanel {...input} />)
-    fireEvent.click(screen.getAllByRole('button', { name: '刷新' })[0]!)
-    await waitFor(() =>{  expect(screen.getByRole('status').textContent).toContain(zh.failure) })
+    fireEvent.click(screen.getByRole('button', { name: '刷新租户' }))
+    await waitFor(() =>{  expect(screen.getAllByRole('status')[0]?.textContent).toContain(zh.failure) })
     expect(input.logout).not.toHaveBeenCalled()
-    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
   it('polls the accepted runtime and retains the operation when cloud access is suspended', async () => {
     const input = props('cloud')
@@ -54,14 +55,13 @@ describe('cloud workspace UI', () => {
       return []
     })
     const view = render(<CloudPanel {...input} />)
-    fireEvent.click(screen.getAllByRole('button', { name: '刷新' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '刷新租户' }))
     await screen.findByRole('option', { name: 'Team A' })
     fireEvent.change(screen.getByRole('combobox', { name: '租户' }), { target: { value: 'tenant-a' } })
-    fireEvent.click(screen.getAllByRole('button', { name: '刷新' })[1]!)
+    fireEvent.click(screen.getByRole('button', { name: '刷新工作空间' }))
     await screen.findByRole('option', { name: 'Workspace A' })
     fireEvent.change(screen.getByRole('combobox', { name: '工作空间' }), { target: { value: 'workspace-a' } })
-    const sandbox = screen.getByRole('heading', { name: '云端沙箱' }).closest('section')!
-    fireEvent.click(within(sandbox).getByRole('button', { name: '刷新' }))
+    fireEvent.click(screen.getByRole('button', { name: '刷新资源' }))
     await screen.findByRole('option', { name: 'Sandbox A' })
     fireEvent.change(screen.getByRole('combobox', { name: '云端沙箱' }), { target: { value: 'runtime-a' } })
     fireEvent.change(screen.getByRole('textbox', { name: '云端命令' }), { target: { value: 'pwd' } })
@@ -71,8 +71,8 @@ describe('cloud workspace UI', () => {
     expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ path: '/tenants/tenant-a/workspaces/workspace-a/runtimes/runtime-accepted/operations/operation-a' }))
     expect(screen.getByRole('button', { name: '取消任务' })).toBeTruthy()
     const suspended = props('cloud-suspended', 9)
-    view.rerender(<CloudPanel {...suspended} />)
-    await waitFor(() =>{  expect(screen.getByLabelText('任务结果').textContent).toContain('operation-a') })
+    view.rerender(<CloudPanel {...input} useCloud={suspended.useCloud} />)
+    await waitFor(() =>{  expect(screen.getByText('operation-a')).toBeTruthy() })
     expect(screen.getByRole('button', { name: '取消任务' }).hasAttribute('disabled')).toBe(true)
     expect(screen.queryByRole('textbox', { name: '云端命令' })).toBeNull()
   })
@@ -80,11 +80,13 @@ describe('cloud workspace UI', () => {
     const input = props('cloud')
     const firstPage = Array.from({ length: 100 }, (_, i) => ({ event: `event-${i}` }))
     vi.mocked(input.call).mockImplementation(async (request) => {
-      if (request.path === '/me/tenants') return [{ id: 't', name: 'Team' }]
-      if (request.path === '/tenants/t/workspaces') return { items: [{ id: 'w', name: 'Workspace' }] }
-      if (request.path.endsWith('/runtimes')) return { resources: [{ id: 'r', name: 'Sandbox' }] }
-      if (request.path.endsWith('/sessions')) return { items: [{ id: 's', name: 'Conversation', runtimeId: 'r' }] }
-      if (request.path.endsWith('/prompts')) return { id: 'o', runtimeId: 'r', state: 'queued' }
+      if (request.path === '/server-info') return { serverId: '10000000-0000-4000-8000-000000000010' }
+      if (request.path.endsWith('/binding')) return { schemaVersion: 1, serverId: '10000000-0000-4000-8000-000000000010', tenantId: '10000000-0000-4000-8000-000000000001', workspaceId: '10000000-0000-4000-8000-000000000002', cloudSessionId: '10000000-0000-4000-8000-000000000004', runtimeId: '10000000-0000-4000-8000-000000000003', credentialRef: '10000000-0000-4000-8000-000000000005', desktopId: null, bindingRevision: 7, state: 'active' }
+      if (request.path === '/me/tenants') return [{ id: '10000000-0000-4000-8000-000000000001', name: 'Team' }]
+      if (request.path === '/tenants/10000000-0000-4000-8000-000000000001/workspaces') return { items: [{ id: '10000000-0000-4000-8000-000000000002', name: 'Workspace' }] }
+      if (request.path.endsWith('/runtimes')) return { resources: [{ id: '10000000-0000-4000-8000-000000000003', name: 'Sandbox' }, { id: '10000000-0000-4000-8000-000000000006', name: 'Browsing sandbox' }] }
+      if (request.path.endsWith('/sessions')) return { items: [{ id: '10000000-0000-4000-8000-000000000004', name: 'Conversation', runtimeId: '10000000-0000-4000-8000-000000000003' }] }
+      if (request.path.endsWith('/prompts')) return { id: 'o', runtimeId: '10000000-0000-4000-8000-000000000003', state: 'queued' }
       if (request.path.endsWith('/operations/o')) return { id: 'o', state: 'succeeded' }
       if (request.path.endsWith('/events?after=0')) return { items: firstPage, nextAfter: '100' }
       if (request.path.endsWith('/events?after=100')) return { items: firstPage.map((_, i) => ({ event: `event-${i + 100}` })), nextAfter: '200' }
@@ -92,15 +94,22 @@ describe('cloud workspace UI', () => {
       return []
     })
     render(<CloudPanel {...input} />)
-    fireEvent.click(screen.getAllByRole('button', { name: '刷新' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '刷新租户' }))
     await screen.findByRole('option', { name: 'Team' })
-    fireEvent.change(screen.getByRole('combobox', { name: '租户' }), { target: { value: 't' } })
-    fireEvent.click(screen.getAllByRole('button', { name: '刷新' })[1]!)
+    fireEvent.change(screen.getByRole('combobox', { name: '租户' }), { target: { value: '10000000-0000-4000-8000-000000000001' } })
+    fireEvent.click(screen.getByRole('button', { name: '刷新工作空间' }))
     await screen.findByRole('option', { name: 'Workspace' })
-    fireEvent.change(screen.getByRole('combobox', { name: '工作空间' }), { target: { value: 'w' } })
-    fireEvent.click(within(screen.getByRole('heading', { name: '云端沙箱' }).closest('section')!).getByRole('button', { name: '刷新' }))
+    fireEvent.change(screen.getByRole('combobox', { name: '工作空间' }), { target: { value: '10000000-0000-4000-8000-000000000002' } })
+    fireEvent.click(screen.getByRole('button', { name: '刷新资源' }))
+    fireEvent.click(screen.getByRole('button', { name: '会话' }))
     await screen.findByRole('option', { name: 'Conversation' })
-    fireEvent.change(screen.getByRole('combobox', { name: '云端会话' }), { target: { value: 's' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '云端会话' }), { target: { value: '10000000-0000-4000-8000-000000000004' } })
+    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '刷新会话绑定' }))
+    await screen.findByText('绑定已启用 · 版本 7')
+    fireEvent.change(screen.getByRole('combobox', { name: '云端沙箱' }), { target: { value: '10000000-0000-4000-8000-000000000006' } })
+    expect(screen.getByText(zh.browsingResource)).toBeTruthy()
+    expect(screen.getByRole('region', { name: zh.binding }).textContent).toMatchSnapshot()
     fireEvent.change(screen.getByRole('textbox', { name: '发送给云端 DSH 的消息' }), { target: { value: 'hello' } })
     for (let i = 0; i < 2; i++) {
       fireEvent.click(screen.getByRole('button', { name: '发送' }))
@@ -109,5 +118,48 @@ describe('cloud workspace UI', () => {
       expect(output).toContain('terminal-event')
       expect(output.split('\n')).toHaveLength(201)
     }
+    expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ body: { prompt: 'hello', timeoutSeconds: 180, expectedBindingRevision: 7 } }))
+    expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ path: '/tenants/10000000-0000-4000-8000-000000000001/workspaces/10000000-0000-4000-8000-000000000002/runtimes/10000000-0000-4000-8000-000000000003/operations/o' }))
   })
+  it('retains late acceptance after closing the panel and queries the original task without resubmitting', async () => {
+    const input = props('cloud'), pending = Promise.withResolvers<CloudValue>()
+    input.viewActions.tenant('t'); input.viewActions.workspace('w'); input.viewActions.resource('runtime', 'r')
+    vi.mocked(input.call).mockImplementation(async (request) => {
+      if (request.method === 'POST') return pending.promise
+      return { id: 'retained-operation', state: 'succeeded', result: { stdout: 'original task' } }
+    })
+    const first = render(<CloudPanel {...input} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '云端命令' }), { target: { value: 'pwd' } })
+    fireEvent.click(screen.getByRole('button', { name: '在云端执行' }))
+    first.unmount()
+    pending.resolve({ id: 'retained-operation', runtimeId: 'accepted-runtime', state: 'queued' })
+    await waitFor(() => { expect(input.call).toHaveBeenCalledTimes(1) })
+    render(<CloudPanel {...input} />)
+    await screen.findByText('retained-operation')
+    fireEvent.click(screen.getByRole('button', { name: '查询原任务' }))
+    await waitFor(() => { expect(screen.getByLabelText('任务结果').textContent).toContain('original task') })
+    expect(vi.mocked(input.call).mock.calls.filter(([request]) => request.method === 'POST')).toHaveLength(1)
+    expect(input.call).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'GET', path: '/tenants/t/workspaces/w/runtimes/accepted-runtime/operations/retained-operation' }))
+    expect(input.logout).not.toHaveBeenCalled()
+  })
+
+  it('retains an unknown submission across panel closure and isolates its reference from another workspace', async () => {
+    const input = props('cloud')
+    input.viewActions.tenant('t'); input.viewActions.workspace('w'); input.viewActions.resource('runtime', 'r')
+    vi.mocked(input.call).mockRejectedValue(new Error('response lost'))
+    const first = render(<CloudPanel {...input} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '云端命令' }), { target: { value: 'pwd' } })
+    fireEvent.click(screen.getByRole('button', { name: '在云端执行' }))
+    await screen.findByText(zh.unknownResult)
+    first.unmount()
+    const second = render(<CloudPanel {...input} />)
+    expect(screen.getByText(zh.unknownResult)).toBeTruthy()
+    expect(input.call).toHaveBeenCalledTimes(1)
+    second.unmount()
+    input.viewActions.workspace('other')
+    render(<CloudPanel {...input} />)
+    expect(screen.queryByText(zh.unknownResult)).toBeNull()
+    expect(input.call).toHaveBeenCalledTimes(1)
+  })
+
 })

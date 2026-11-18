@@ -25,7 +25,7 @@ export function createCloudSource(read: () => Promise<CloudSnapshot>): CloudSour
   let closed = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const publish = (next: CloudSnapshot): void => {
-    if (closed || JSON.stringify(next) === JSON.stringify(snapshot)) return
+    if (closed || next.epoch < snapshot.epoch || JSON.stringify(next) === JSON.stringify(snapshot)) return
     snapshot = next
     for (const listener of listeners) listener()
   }

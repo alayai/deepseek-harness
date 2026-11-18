@@ -40,6 +40,21 @@
     },
     {
       "path": "../../util/crypto"
+    },
+    {
+      "path": "../../client/store"
+    },
+    {
+      "path": "../../client/ui-sidebar"
+    },
+    {
+      "path": "../../client/ui-sidebar-right"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../util/brand"
     }
   ]
 }

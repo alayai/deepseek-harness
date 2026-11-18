@@ -35,6 +35,15 @@
     },
     {
       "path": "../../client/connection/tsconfig.host.json"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../util/brand"
+    },
+    {
+      "path": "../../session-query/session-query"
     }
   ]
 }

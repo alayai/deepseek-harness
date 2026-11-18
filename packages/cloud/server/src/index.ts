@@ -8,9 +8,10 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-terminal'
 import type { IncomingMessage } from 'node:http'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { readLocal } from './local-read.ts'
 import { CloudConnection } from './connection.ts'
 import { CloudApiError } from './transport.ts'
-import type { CloudRequest, CloudSnapshot, CloudValue } from './types.ts'
+import type { CloudRequest, CloudSnapshot, CloudValue, LocalReadRequest, LocalReadResult } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { dshCloud: DshCloudService }
@@ -23,6 +24,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 export class DshCloudService extends TypertRemoteService {
   static inject = ['agents', 'tools', 'jobs', 'typertGateway']
   private readonly cloud: CloudConnection
+  private readonly localReads = new AbortController()
+  private readsInFlight = 0
   private readonly localHttp = new Set<{ request: IncomingMessage; done: Promise<void> }>()
 
   constructor(ctx: Context) {
@@ -30,7 +33,7 @@ export class DshCloudService extends TypertRemoteService {
     this.cloud = new CloudConnection(signal => this.drainLocal(signal))
     ctx.on('connection/request', async (request, response, next) => {
       const path = new URL(request.url ?? '/', 'http://host').pathname
-      if (/^\/api\/dshCloud\/(?:state|beginLogin|request|logout)$/.test(path)) {  await next(); return }
+      if (/^\/api\/dshCloud\/(?:state|beginLogin|request|logout|readLocal)$/.test(path)) {  await next(); return }
       if (this.cloud.snapshot().mode !== 'local') {
         response.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify({ error: { code: 'CLOUD_LOCAL_TARGET_BLOCKED' } }))
@@ -48,7 +51,7 @@ export class DshCloudService extends TypertRemoteService {
     })
     ctx.tools.guard(() => this.cloud.snapshot().mode === 'local' ? undefined : 'DSH_CLOUD_LOCAL_EXECUTION_BLOCKED')
     ctx.on('agent/pre-step', async (_payload, next) => this.cloud.snapshot().mode === 'local' ? next() : { kind: 'reject' })
-    ctx.effect(() => () => this.cloud.dispose(), 'dsh-server: cloud authority')
+    ctx.effect(() => () => { this.localReads.abort(); return this.cloud.dispose() }, 'dsh-server: cloud authority')
   }
 
   private assertOwner(): void {
@@ -107,6 +110,37 @@ export class DshCloudService extends TypertRemoteService {
       throw new RemoteError('cloud/blocked', 'The cloud operation did not complete. Check its operation ID before retrying.',
         { reason: error instanceof CloudApiError ? error.code : 'CONNECTION_LOST' }, { cause: error })
     }
+  }
+
+  /**
+   * Browse local text history or loaded Bot settings while cloud execution is selected.
+   * @param input - explicit page and displayed login epoch; never a cloud API path.
+   * @returns owner-only text with no local execution or automatic upload.
+   */
+  @Remote
+  async readLocal(input: LocalReadRequest): Promise<LocalReadResult> {
+    this.assertOwner()
+    const assertCurrent = (): void => {
+      const state = this.cloud.snapshot()
+      if (this.localReads.signal.aborted || state.epoch !== input.epoch || !['cloud', 'cloud-suspended'].includes(state.mode)) {
+        throw new CloudApiError('STALE_LOCAL_READ', 409)
+      }
+    }
+    if (this.readsInFlight >= 4) throw new RemoteError('cloud/blocked', 'Local history is busy', { reason: 'LOCAL_READ_BUSY' })
+    this.readsInFlight++
+    try {
+      assertCurrent()
+      const signal = AbortSignal.any([
+        this.localReads.signal, AbortSignal.timeout(15_000),
+        ...(this.ctx.invocation ? [this.ctx.invocation.signal] : []),
+      ])
+      const value = await readLocal(this.ctx, input, signal)
+      signal.throwIfAborted()
+      assertCurrent()
+      return value
+    } catch (error) {
+      throw new RemoteError('cloud/blocked', 'Local read did not complete', { reason: error instanceof CloudApiError ? error.code : 'LOCAL_READ_FAILED' })
+    } finally { this.readsInFlight-- }
   }
 
   /**

@@ -23,7 +23,6 @@ export async function nativeLogin(
   const issuer = new URL(discovery.issuer)
   // The validated origin permits HTTP only for loopback development identity servers.
   const config = await oidc.discovery(issuer, discovery.desktopClientId, undefined, oidc.None(),
-    // oxlint-disable-next-line typescript/no-deprecated -- loopback-only development issuer, validated above
     issuer.protocol === 'http:' ? { execute: [oidc.allowInsecureRequests] } : {})
   const state = oidc.randomState(), nonce = oidc.randomNonce(), verifier = oidc.randomPKCECodeVerifier()
   const callback = Promise.withResolvers<URL>()

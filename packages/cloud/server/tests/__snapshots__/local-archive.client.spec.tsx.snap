@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loads only explicit local reads and renders saved HTML as text 1`] = `"local-a你<img src=x onerror=alert(1)>"`;
