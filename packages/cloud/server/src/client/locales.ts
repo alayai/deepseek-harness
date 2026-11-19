@@ -1,14 +1,21 @@
 /** Cloud UI copy, separate from DeepSeek platform login. */
 export const en = {
+  compatibility: 'Version diagnostics', checkCompatibility: 'Check running versions', compatibilityHint: 'Read-only report from the connected API and its Worker. An unavailable feature stays in the cloud; ask the administrator to run the upgrade doctor.', protocolUnsupported: 'This server does not support the required cloud protocol. Update the API and Worker together, then reconnect; local execution stays paused.',
+  eventRunning: 'Running', eventSucceeded: 'Completed', eventFailed: 'Failed', eventInterrupted: 'Interrupted', eventDetails: 'Details',
+  artifactTitle: 'Cloud artifacts', artifactHint: 'Read a cloud file, then explicitly publish its result to RustFS (up to 16 KiB). Files remain unscanned.', artifactFilename: 'Artifact filename', artifactPublish: 'Publish to RustFS', artifactFailed: 'Publication could not be confirmed. Check the retained request before retrying.', artifactSource: 'Source operation', artifactUnknown: 'Receipt pending; keep the original request key.', artifactRetry: 'Check or retry original publication', connectDesktop: 'Connect interactive desktop',
   localArchive: 'Local history and Bots · read only', readOnly: 'Read only',
   localReadHint: 'Reads stay on this Host and are not uploaded. Only user and assistant text and selected Bot settings are shown. Text may contain information you entered. Local execution remains paused.',
   localSessions: 'Refresh local conversations', localBots: 'Refresh local Bot summaries', openCloudConversation: 'Go to cloud conversations',
   localReadFailed: 'Local history could not be read. Refresh or update the Bot plugin; local execution stays paused.',
+  exportFailed: 'The export could not be confirmed. Refresh and review the saved request before retrying.',
+  confirmRevision: 'Confirm new revision', retryBotExport: 'Check or retry original export', botExportPending: 'An export receipt is pending. An explicit retry uses the original request key; a changed definition must be reconciled first.',
   viewLocalText: 'View conversation text', nextPage: 'Next page', olderMessages: 'Older messages', localMessages: 'Local conversation text',
   localUser: 'You', localAssistant: 'Assistant', textTruncated: 'Text was shortened for this preview.',
   botProviderMissing: 'The read-only Bot provider is unavailable. Update or enable DS Bot to view loaded settings.',
   botProviderLoading: 'DS Bot has not loaded its roster. This preview does not initialize it.',
   localBotSettings: 'View Bot settings', privateBot: 'Private Bot · visible only to the Host owner',
+  exportHint: 'Export is explicit and copies only the complete public name, role and instructions. Model credentials, folders, skills, memory and history stay local.',
+  exportBot: 'Preview public Bot export', publishRevision: 'Publish new cloud revision', exportPreview: 'Review cloud Bot export', exportPreviewBoundary: 'Only the displayed name, role and instructions will be copied. Credentials, folders, skills, memory, history and files stay local.', localUpdateDetected: 'The local definition changed since the last synchronization.', cloudBotArchived: 'The cloud Bot is archived and cannot receive a new revision.', cloudBotUnknown: 'The cloud copy could not be verified; review before exporting again.', cloudBotUpdated: 'The cloud copy has a newer revision; review before publishing.', confirmExport: 'Confirm export', cancelExport: 'Cancel export', exportedBot: 'Cloud Bot is synchronized', privateExportBlocked: 'Private Bots cannot be copied to the cloud.', exportUnavailable: 'Choose a Workspace and use a server with cloud Bot support to export.',
 
   sessionDesktop: 'Desktop for new conversation (optional)', binding: 'Conversation resources', bindingRevision: 'Revision', bindingUnknown: 'Refresh the binding before sending a message.',
   bindingActive: 'Binding active', bindingDisabled: 'Binding disabled', refreshBinding: 'Refresh binding',
@@ -38,7 +45,7 @@ export const en = {
   screenshot: 'Desktop screenshot', desktopAlt: 'Cloud private desktop screenshot',
   browser: 'Cloud browser', browserUrl: 'Offline URL (about:blank or data:text/html,)', navigate: 'Navigate in cloud',
   browserContent: 'Read page', type: 'Type on cloud desktop', text: 'Desktop text',
-  events: 'Cloud conversation events', result: 'Operation result', waiting: 'Working…',
+  events: 'Cloud conversation events', userMessage: 'You', assistantMessage: 'Assistant', toolMessage: 'Tool', statusMessage: 'Status', errorMessage: 'Error', unknownMessage: 'Cloud event', result: 'Operation result', waiting: 'Working…',
   empty: 'No items', localBlocked: 'Local operations remain paused. Reconnect or explicitly sign out.',
   uploadHint: 'Only the file you select is uploaded. Local folders are never mounted automatically.',
 } as const
@@ -46,15 +53,22 @@ export const en = {
 export type CloudKey = keyof typeof en
 /** Chinese cloud UI dictionary. */
 export const zh: Record<CloudKey, string> = {
+  compatibility: '版本诊断', checkCompatibility: '检查运行版本', compatibilityHint: '只读查看当前 API 和 Worker 报告；功能未就绪时仍保留云端目标，请管理员运行升级诊断', protocolUnsupported: '服务器不支持所需云端协议，请同步更新 API 和 Worker 后重新连接；本地执行保持暂停',
+  eventRunning: '执行中', eventSucceeded: '已完成', eventFailed: '失败', eventInterrupted: '已中断', eventDetails: '详情',
+  artifactTitle: '云端产物', artifactHint: '先读取云端文件，再明确发布到 RustFS（最多 16 KiB）；文件尚未扫描', artifactFilename: '产物文件名', artifactPublish: '发布到 RustFS', artifactFailed: '无法确认发布结果，请核对保留的请求后再重试', artifactSource: '来源任务', artifactUnknown: '回执待确认，已保留原请求编号', artifactRetry: '核对或重试原发布', connectDesktop: '连接交互式桌面',
   localArchive: '本地历史与 Bot · 只读', readOnly: '只读',
   localReadHint: '读取仅在当前 Host 内完成，不会上传。只展示用户和助手文本及选定的 Bot 配置；文本可能包含你曾输入的信息。本地执行保持暂停。',
   localSessions: '刷新本地会话', localBots: '刷新本地 Bot 摘要', openCloudConversation: '前往云端会话',
   localReadFailed: '本地历史读取失败，请刷新或更新 Bot 插件；本地执行保持暂停。',
+  exportFailed: '无法确认导出结果。请刷新并复核保留的原请求，再决定是否重试。',
+  confirmRevision: '确认发布新版本', retryBotExport: '核对或重试原导出', botExportPending: '导出回执尚待确认。手动重试会使用原请求编号；定义已经变化时需先核对原请求。',
   viewLocalText: '查看会话文本', nextPage: '下一页', olderMessages: '更早的消息', localMessages: '本地会话文本',
   localUser: '你', localAssistant: '助手', textTruncated: '此预览中的文本已截短。',
   botProviderMissing: '只读 Bot 服务不可用，请更新或启用 DS Bot 后查看已加载的配置。',
   botProviderLoading: 'DS Bot 尚未加载团队；预览不会触发初始化。',
   localBotSettings: '查看 Bot 配置', privateBot: '隐私 Bot · 仅 Host 所有者可见',
+  exportHint: '导出必须由你明确点击，只复制完整的公开名称、角色和指令。模型凭据、目录、技能、记忆和历史保留在本地。',
+  exportBot: '预览公开 Bot 导出', publishRevision: '发布新的云端版本', exportPreview: '确认云端 Bot 导出内容', exportPreviewBoundary: '只会复制当前显示的名称、角色和指令。凭据、目录、技能、记忆、历史和文件保留在本地。', localUpdateDetected: '检测到本地定义相比上次同步已经变化。', cloudBotArchived: '云端 Bot 已归档，不能继续发布版本。', cloudBotUnknown: '无法确认云端副本状态，请先复核再导出。', cloudBotUpdated: '云端副本已有更新版本，请先复核再发布。', confirmExport: '确认导出', cancelExport: '取消导出', exportedBot: '云端 Bot 已同步', privateExportBlocked: '隐私 Bot 不允许复制到云端。', exportUnavailable: '请先选择工作空间，并使用支持云端 Bot 的服务端。',
 
   sessionDesktop: '新会话的桌面（可选）', binding: '会话绑定资源', bindingRevision: '版本', bindingUnknown: '请刷新绑定后再发送消息',
   bindingActive: '绑定已启用', bindingDisabled: '绑定已停用', refreshBinding: '刷新会话绑定',
@@ -84,7 +98,7 @@ export const zh: Record<CloudKey, string> = {
   screenshot: '桌面截图', desktopAlt: '云端私有桌面截图',
   browser: '云端浏览器', browserUrl: '离线地址（about:blank 或 data:text/html,）', navigate: '在云端打开',
   browserContent: '读取网页', type: '向云端桌面输入', text: '桌面输入文本',
-  events: '云端会话事件', result: '任务结果', waiting: '处理中…',
+  events: '云端会话消息', userMessage: '你', assistantMessage: '助手', toolMessage: '工具', statusMessage: '状态', errorMessage: '错误', unknownMessage: '云端事件', result: '任务结果', waiting: '处理中…',
   empty: '暂无内容', localBlocked: '本地操作保持暂停，请重新登录或明确退出云端',
   uploadHint: '只上传你明确选择的文件，不会自动挂载本地目录',
 }

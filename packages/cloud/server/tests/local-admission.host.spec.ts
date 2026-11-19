@@ -7,7 +7,7 @@ import type { LocalReadRequest } from '../src/types.ts'
 
 vi.mock('../src/login.ts', async () => {
   const { ServerTransport } = await import('../src/transport.ts')
-  return { nativeLogin: async () => ({ expiresAt: Date.now() + 60_000, transport: new ServerTransport('http://localhost:17800', 'test-only', async () => new Response(JSON.stringify({ data: { execution: { authenticatedMode: 'cloud', localFallback: false } } }))) }) }
+  return { nativeLogin: async () => ({ expiresAt: Date.now() + 60_000, transport: new ServerTransport('http://localhost:17800', 'test-only', async () => new Response(JSON.stringify({ data: { compatibility: { protocol: 1, client: { min: 1, max: 1 } }, execution: { authenticatedMode: 'cloud', localFallback: false } } }))) }) }
 })
 
 declare module '@deepseek-ai/dsh-typert-protocol' {

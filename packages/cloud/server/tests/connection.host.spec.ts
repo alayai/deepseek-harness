@@ -8,7 +8,7 @@ function inputUrl(input: Parameters<typeof fetch>[0]): string {
 
 const connections: CloudConnection[] = []
 afterEach(async () => { await Promise.all(connections.splice(0).map(connection => connection.dispose())) })
-const policy = { execution: { authenticatedMode: 'cloud', localFallback: false } }
+const policy = { compatibility: { protocol: 1, client: { min: 1, max: 1 } }, execution: { authenticatedMode: 'cloud', localFallback: false } }
 function fixture(options: { drain?: (signal: AbortSignal) => Promise<void>; fetcher?: typeof fetch } = {}) {
   const fetcher = options.fetcher ?? vi.fn<typeof fetch>(async input => new Response(JSON.stringify({ data: inputUrl(input).endsWith('/server-info') ? policy : { id: 'cloud-user' } })))
   const transport = new ServerTransport('http://localhost:17800', 'host-secret', fetcher)
@@ -119,6 +119,24 @@ describe('Host-owned cloud target', () => {
     await vi.waitFor(() =>{  expect(cloud.snapshot().mode).toBe('cloud') })
     expect(authenticate).toHaveBeenCalledTimes(2)
     expect(vi.mocked(fetcher).mock.calls.some(([input]) => inputUrl(input).endsWith('/auth/logout'))).toBe(true)
+  })
+  it.each([undefined, { protocol: 2, client: { min: 1, max: 1 } }, { protocol: 1, client: { min: 2, max: 2 } }])('keeps issued authority blocked on an unsupported contract: %j', async (compatibility) => {
+    const { cloud } = fixture({ fetcher: async input => new Response(JSON.stringify({ data: inputUrl(input).endsWith('/server-info') ? { ...policy, compatibility } : {} })) })
+    cloud.beginLogin('http://localhost:17800')
+    await vi.waitFor(() => { expect(cloud.snapshot().error).toBe('CLOUD_PROTOCOL_UNSUPPORTED') })
+    expect(cloud.snapshot()).toMatchInlineSnapshot(`
+      {
+        "authorizationUrl": null,
+        "epoch": 2,
+        "error": "CLOUD_PROTOCOL_UNSUPPORTED",
+        "mode": "cloud-suspended",
+        "serverUrl": "http://localhost:17800",
+      }
+    `)
+    expect(cloud.snapshot().mode).toBe('cloud-suspended')
+    await expect(cloud.request(request(cloud))).rejects.toMatchObject({ code: 'CLOUD_TARGET_BLOCKED' })
+    await cloud.logout()
+    expect(cloud.snapshot().mode).toBe('local')
   })
   it('refuses servers advertising local fallback', async () => {
     const { cloud } = fixture({ fetcher: async () => new Response(JSON.stringify({ data: { execution: { authenticatedMode: 'cloud', localFallback: true } } })) })

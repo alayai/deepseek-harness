@@ -16,7 +16,7 @@ function props(mode: CloudSnapshot['mode'] = 'local', epoch = 8): CloudPanelProp
     useView: bindSnapshotSelector(store), viewActions: store.actions,
     useActivities: bindSnapshotSelector(activities.source), remember: activities.remember, accepted: activities.accepted,
     t: makeTranslate(zh), useCloud: <T,>(select: (value: CloudSnapshot) => T) => select(snapshot),
-    readLocal: vi.fn(async () => ({ kind: 'sessions' as const, items: [], nextOffset: null })), login: vi.fn(async () => {}), logout: vi.fn(async () => {}), call: vi.fn(async () => null),
+    readLocal: vi.fn(async () => ({ kind: 'sessions' as const, items: [], nextOffset: null })), exportLocal: vi.fn(async () => ({ version: 1 as const, exportable: false, reason: 'NOT_READY' as const })), login: vi.fn(async () => {}), logout: vi.fn(async () => {}), call: vi.fn(async () => null),
   }
   return input
 }
@@ -78,7 +78,7 @@ describe('cloud workspace UI', () => {
   })
   it('drains terminal event pages and replaces replayed history on the next prompt', async () => {
     const input = props('cloud')
-    const firstPage = Array.from({ length: 100 }, (_, i) => ({ event: `event-${i}` }))
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'assistant/message', data: { text: `event-${i}` } } }))
     vi.mocked(input.call).mockImplementation(async (request) => {
       if (request.path === '/server-info') return { serverId: '10000000-0000-4000-8000-000000000010' }
       if (request.path.endsWith('/binding')) return { schemaVersion: 1, serverId: '10000000-0000-4000-8000-000000000010', tenantId: '10000000-0000-4000-8000-000000000001', workspaceId: '10000000-0000-4000-8000-000000000002', cloudSessionId: '10000000-0000-4000-8000-000000000004', runtimeId: '10000000-0000-4000-8000-000000000003', credentialRef: '10000000-0000-4000-8000-000000000005', desktopId: null, bindingRevision: 7, state: 'active' }
@@ -89,8 +89,8 @@ describe('cloud workspace UI', () => {
       if (request.path.endsWith('/prompts')) return { id: 'o', runtimeId: '10000000-0000-4000-8000-000000000003', state: 'queued' }
       if (request.path.endsWith('/operations/o')) return { id: 'o', state: 'succeeded' }
       if (request.path.endsWith('/events?after=0')) return { items: firstPage, nextAfter: '100' }
-      if (request.path.endsWith('/events?after=100')) return { items: firstPage.map((_, i) => ({ event: `event-${i + 100}` })), nextAfter: '200' }
-      if (request.path.endsWith('/events?after=200')) return { items: [{ event: 'terminal-event' }], nextAfter: '201' }
+      if (request.path.endsWith('/events?after=100')) return { items: firstPage.map((_, i) => ({ id: String(i + 101), operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'assistant/message', data: { text: `event-${i + 100}` } } })), nextAfter: '200' }
+      if (request.path.endsWith('/events?after=200')) return { items: [{ id: '201', operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'turn/end', data: { reason: { kind: 'completed' } } } }], nextAfter: '201' }
       return []
     })
     render(<CloudPanel {...input} />)
@@ -114,9 +114,9 @@ describe('cloud workspace UI', () => {
     for (let i = 0; i < 2; i++) {
       fireEvent.click(screen.getByRole('button', { name: '发送' }))
       await waitFor(() =>{  expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false) })
-      const output = screen.getByLabelText('云端会话事件').textContent
-      expect(output).toContain('terminal-event')
-      expect(output.split('\n')).toHaveLength(201)
+      const output = screen.getByLabelText(zh.events)
+      expect(output.textContent).toContain('Turn ended: completed')
+      expect(output.querySelectorAll('li')).toHaveLength(201)
     }
     expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ body: { prompt: 'hello', timeoutSeconds: 180, expectedBindingRevision: 7 } }))
     expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ path: '/tenants/10000000-0000-4000-8000-000000000001/workspaces/10000000-0000-4000-8000-000000000002/runtimes/10000000-0000-4000-8000-000000000003/operations/o' }))

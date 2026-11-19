@@ -5,6 +5,7 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LocalArchive } from '../src/client/LocalArchive.tsx'
 import { zh } from '../src/client/locales.ts'
+import type { BotSyncRecord } from '../src/client/bot-sync.ts'
 import type { LocalReadRequest, LocalReadResult } from '../src/types.ts'
 
 afterEach(cleanup)
@@ -37,6 +38,25 @@ it('offers read-only Bot previews during cloud pause and distinguishes an absent
   fireEvent.click(screen.getByRole('button', { name: zh.localBots }))
   await screen.findByText(zh.botProviderMissing)
   expect(read).toHaveBeenCalledWith({ kind: 'bots', epoch: 3, offset: 0 })
+})
+
+it('exports only a public Bot after an explicit click and keeps private Bots blocked', async () => {
+  const read = vi.fn(async (): Promise<LocalReadResult> => ({ kind: 'bots', available: true, ready: true, items: [
+    { id: 'public-bot' as never, name: 'Public', role: '', instructions: 'safe', model: 'local/model', private: false, truncated: false },
+    { id: 'private-bot' as never, name: 'Private', role: '', instructions: 'secret', model: 'local/model', private: true, truncated: false },
+  ], nextOffset: null }))
+  const previewBot = vi.fn(async () => ({ scope: { serverUrl: 'https://cloud.test', serverId: 'server-a', userId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a' }, status: 'new' as const, definition: { schemaVersion: 1 as const, name: 'Public', role: '', instructions: 'safe', requiredCapabilities: [] as const }, source: { kind: 'local-export' as const, localBotId: 'public-bot', exportVersion: 1 as const, exportedAt: new Date(1).toISOString(), contentSha256: 'a'.repeat(64) } }))
+  const exportBot = vi.fn(async (): Promise<BotSyncRecord> => ({ ...((await previewBot()).scope), localBotId: 'public-bot', cloudBotId: 'cloud-a', cloudRevision: 1, cloudVersion: 1, contentSha256: 'a'.repeat(64), syncedAt: new Date(1).toISOString() }))
+  render(<LocalArchive t={t} epoch={4} read={read} previewBot={previewBot} exportBot={exportBot} cloudAvailable openCloud={vi.fn()} />)
+  fireEvent.click(screen.getByText(zh.localArchive))
+  fireEvent.click(screen.getByRole('button', { name: zh.localBots }))
+  await screen.findByText('Public')
+  fireEvent.click(screen.getByRole('button', { name: zh.exportBot }))
+  await screen.findByRole('region', { name: zh.exportPreview })
+  expect(exportBot).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: zh.confirmExport }))
+  await waitFor(() => { expect(exportBot).toHaveBeenCalledWith('public-bot', expect.objectContaining({ source: expect.objectContaining({ kind: 'local-export' }) })) })
+  expect(screen.getByText(zh.privateExportBlocked)).toBeTruthy()
 })
 
 it('drops a pending read after the view closes', async () => {

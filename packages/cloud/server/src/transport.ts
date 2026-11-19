@@ -1,5 +1,7 @@
 /** Versioned dsh-server v1 transport. Never follows redirects with credentials. */
 import { z } from 'zod'
+import { WebSocket } from 'ws'
+import { openDesktopRelay } from './desktop-relay.ts'
 import type { CloudRequest, CloudValue } from './types.ts'
 
 const value: z.ZodType<CloudValue> = z.lazy(() => z.union([
@@ -79,6 +81,23 @@ export class ServerTransport {
       throw new CloudApiError(error.success ? error.data.error.code : 'UPSTREAM_FAILURE', response.status)
     }
     return z.object({ data: value }).parse(JSON.parse(raw)).data
+  }
+
+  /** Issue a single-use, loopback viewer for one authorized cloud desktop. */
+  async desktopViewer(path: string, signal: AbortSignal, closed: () => void): Promise<CloudValue> {
+    if (!/^\/tenants\/[a-f0-9-]+\/workspaces\/[a-f0-9-]+\/desktops\/[a-f0-9-]+$/.test(path)) throw new CloudApiError('INVALID_DESKTOP_PATH', 400)
+    const result = await this.request({ path: path + '/tickets', method: 'POST', body: null, idempotencyKey: null }, signal)
+    const ticket = z.object({ ticket: z.string().min(20).max(128), websocketPath: z.literal('/api/v1' + path + '/connect') }).parse(result)
+    const url = new URL(ticket.websocketPath, this.origin); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket.ticket)
+    const viewerUrl = await openDesktopRelay({ signal, closed,
+      connect: () => new WebSocket(url, { headers: { Authorization: `Bearer ${this.token}`, Origin: this.origin }, maxPayload: 4 * 1024 * 1024, followRedirects: false, handshakeTimeout: 15_000 }),
+      asset: async (path) => {
+        const response = await this.fetcher(this.origin + path, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) })
+        if (!response.ok) throw new CloudApiError('DESKTOP_ASSET_FAILED', response.status)
+        return responseText(response)
+      },
+    })
+    return { viewerUrl }
   }
 
   /** Revoke the server login before local execution is re-enabled. */

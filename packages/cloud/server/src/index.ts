@@ -9,9 +9,10 @@ import type {} from '@deepseek-ai/dsh-terminal'
 import type { IncomingMessage } from 'node:http'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { readLocal } from './local-read.ts'
+import { exportLocal } from './local-export.ts'
 import { CloudConnection } from './connection.ts'
 import { CloudApiError } from './transport.ts'
-import type { CloudRequest, CloudSnapshot, CloudValue, LocalReadRequest, LocalReadResult } from './types.ts'
+import type { CloudRequest, CloudSnapshot, CloudValue, LocalBotExportResult, LocalReadRequest, LocalReadResult } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { dshCloud: DshCloudService }
@@ -33,7 +34,7 @@ export class DshCloudService extends TypertRemoteService {
     this.cloud = new CloudConnection(signal => this.drainLocal(signal))
     ctx.on('connection/request', async (request, response, next) => {
       const path = new URL(request.url ?? '/', 'http://host').pathname
-      if (/^\/api\/dshCloud\/(?:state|beginLogin|request|logout|readLocal)$/.test(path)) {  await next(); return }
+      if (/^\/api\/dshCloud\/(?:state|beginLogin|request|logout|readLocal|exportLocal)$/.test(path)) {  await next(); return }
       if (this.cloud.snapshot().mode !== 'local') {
         response.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify({ error: { code: 'CLOUD_LOCAL_TARGET_BLOCKED' } }))
@@ -141,6 +142,31 @@ export class DshCloudService extends TypertRemoteService {
     } catch (error) {
       throw new RemoteError('cloud/blocked', 'Local read did not complete', { reason: error instanceof CloudApiError ? error.code : 'LOCAL_READ_FAILED' })
     } finally { this.readsInFlight-- }
+  }
+
+  /** Export one complete public Bot definition after an explicit user action. */
+  @Remote
+  async exportLocal(input: { kind: 'bot'; epoch: number; botId: string }): Promise<LocalBotExportResult> {
+    this.assertOwner()
+    const assertCurrent = (): void => {
+      const state = this.cloud.snapshot()
+      if (this.localReads.signal.aborted || state.epoch !== input.epoch || !['cloud', 'cloud-suspended'].includes(state.mode)) {
+        throw new CloudApiError('STALE_LOCAL_EXPORT', 409)
+      }
+    }
+    assertCurrent()
+    try {
+      const signal = AbortSignal.any([
+        this.localReads.signal, AbortSignal.timeout(15_000),
+        ...(this.ctx.invocation ? [this.ctx.invocation.signal] : []),
+      ])
+      const value = exportLocal(this.ctx, input, signal)
+      signal.throwIfAborted()
+      assertCurrent()
+      return value
+    } catch (error) {
+      throw new RemoteError('cloud/blocked', 'Local Bot export did not complete', { reason: error instanceof CloudApiError ? error.code : 'LOCAL_EXPORT_FAILED' })
+    }
   }
 
   /**

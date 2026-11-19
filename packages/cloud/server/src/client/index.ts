@@ -9,15 +9,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type { LocalBotExportResult } from '../types.ts'
 import { IconGlobeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CloudPanel, type CloudPanelInjected } from './CloudPanel.tsx'
 import { createCloudSource } from './source.ts'
 import { createCloudViewStore } from './view-store.ts'
+import { CloudArtifactReceipts } from './CloudArtifacts.tsx'
+import { CloudSessionReplay } from './session-replay.ts'
 import { createCloudActivities } from './activity.ts'
 import { CloudEntry, CloudIcon, CloudTabTitle } from './CloudEntry.tsx'
 import { en, zh } from './locales.ts'
 
 export const inject = ['remote', 'slots', 'locale', 'connection', 'layout', 'sidebarRight', 'sidebarRightTabs']
+
+type DshCloudRemote = {
+  exportLocal(input: { kind: 'bot'; epoch: number; botId: string }): Promise<{ ok: true; value: LocalBotExportResult } | { ok: false; error: { code: string } }>
+}
 
 const PANEL_ID = 'dsh-cloud' as MainPanelId
 const TAB_ID = '@deepseek-ai/dsh-cloud-server/resources'
@@ -30,13 +37,15 @@ function registerUi(ctx: Context): void {
   const t = ctx.locale.bind('dsh.cloud')
   const store = createCloudViewStore()
   const activities = createCloudActivities()
+  const replay = new CloudSessionReplay()
+  const artifacts = new CloudArtifactReceipts()
   let popup: Window | null = null
   const source = createCloudSource(async () => {
     const result = await ctx.remote.dshCloud.state()
     if (!result.ok) throw new Error(result.error.code)
     return result.value
   })
-  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear() }, 'cloud: client lifetime')
+  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear() }, 'cloud: client lifetime')
   let previous = source.source.getSnapshot().mode
   ctx.effect(() => source.source.subscribe(() => {
     const snapshot = source.source.getSnapshot(), mode = snapshot.mode
@@ -46,12 +55,13 @@ function registerUi(ctx: Context): void {
     }
     if ((mode === 'local' || mode === 'authenticating') && mode !== previous) {
       store.actions.reset()
-      activities.clear()
+      activities.clear(); replay.clear(); artifacts.clear()
     }
     if (mode === 'local' && previous !== 'local') connection.reconnect()
     previous = mode
   }), 'cloud: resume local subscriptions')
   const injectPanel = (): CloudPanelInjected => ({
+    replay, artifacts,
     hooks: { cloud: source.source, activities: activities.source, view: store },
     viewActions: store.actions,
     remember: activities.remember,
@@ -75,6 +85,11 @@ function registerUi(ctx: Context): void {
       const result = await ctx.remote.dshCloud.readLocal(input)
       if (!result.ok) throw new Error(result.error.code)
       return result.value
+    },
+    exportLocal: async (input) => {
+      const result = await (ctx.remote.dshCloud as typeof ctx.remote.dshCloud & DshCloudRemote).exportLocal(input)
+      if (!result.ok) throw new Error(result.error.code)
+      return result.value as LocalBotExportResult
     },
     call: async (input) => {
       const result = await ctx.remote.dshCloud.request(input)

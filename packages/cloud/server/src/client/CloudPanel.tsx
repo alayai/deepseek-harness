@@ -9,10 +9,16 @@ import type { CloudActivities } from './activity.ts'
 import type { CloudSection, CloudViewStore } from './view-store.ts'
 import { readBinding, type CloudBinding } from './binding.ts'
 import { LocalArchive } from './LocalArchive.tsx'
+import { canonicalBotDefinition, definitionDigest, findBotExportAttempt, findBotSyncRecord, reserveBotExportAttempt, rejectBotExportAttempt, sameBotSyncScope, saveBotSyncRecord, type BotExportPreview, type BotSyncRecord, type BotSyncScope } from './bot-sync.ts'
+import { CloudArtifacts, CloudArtifactReceipts } from './CloudArtifacts.tsx'
+import { CloudSessionReplay } from './session-replay.ts'
+import { CloudSessionTimeline } from './CloudSessionTimeline.tsx'
 import css from './CloudPanel.module.css'
 import type {} from './locales.ts'
 
 export interface CloudPanelInjected {
+  artifacts?: CloudArtifactReceipts
+  replay?: CloudSessionReplay
   hooks: { cloud: CloudSource; activities: CloudActivities['source']; view: CloudViewStore }
   viewActions: CloudViewStore['actions']
   remember: CloudActivities['remember']
@@ -20,6 +26,7 @@ export interface CloudPanelInjected {
   login(server: string): Promise<void>
   logout(): Promise<void>
   readLocal(input: LocalReadRequest): Promise<LocalReadResult>
+  exportLocal?(input: { kind: 'bot'; epoch: number; botId: string }): Promise<{ version: 1; exportable: boolean; reason?: string; definition?: { schemaVersion: 1; name: string; role: string; instructions: string; requiredCapabilities: readonly string[] } }>
   call(input: CloudRequest): Promise<CloudValue>
 }
 export type CloudPanelProps = PropsLocale<'dsh.cloud'> & InjectFace<CloudPanelInjected>
@@ -40,7 +47,8 @@ function rows(value: CloudValue): Row[] {
 
 /** Native client view using only Host RPC and explicitly selected RustFS transfers. */
 export function CloudPanel({
-  t, useCloud, useActivities, useView, viewActions: actions, login, logout, call, readLocal, remember, accepted,
+  t, artifacts: sharedArtifacts, replay: sharedReplay, useCloud, useActivities, useView, viewActions: actions,
+  login, logout, call, readLocal, exportLocal, remember, accepted,
 }: CloudPanelProps) {
   const snapshot = useCloud(value => value)
   const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false)
@@ -62,30 +70,108 @@ export function CloudPanel({
   const [endpoint, setEndpoint] = useState('https://api.deepseek.com'), [model, setModel] = useState(''), [apiKey, setApiKey] = useState('')
   const [command, setCommand] = useState(''), [prompt, setPrompt] = useState(''), [path, setPath] = useState('.')
   const [content, setContent] = useState(''), [url, setUrl] = useState('about:blank'), [desktopText, setDesktopText] = useState('')
-  const [result, setResult] = useState<CloudValue>(null), [events, setEvents] = useState<CloudValue[]>([]), [image, setImage] = useState('')
+  const [result, setResult] = useState<CloudValue>(null), [_eventVersion, setEventVersion] = useState(0), [image, setImage] = useState('')
   const [bindingState, setBinding] = useState<{ scope: string; epoch: number; binding: CloudBinding } | null>(null)
   const generation = useRef(0), transfer = useRef<AbortController | undefined>(undefined)
-  const active = useRef({ epoch: snapshot.epoch, tenant, workspace })
-  active.current = { epoch: snapshot.epoch, tenant, workspace }
+  const localReplay = useRef(new CloudSessionReplay()), localArtifacts = useRef(new CloudArtifactReceipts())
+  const active = useRef({ epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl })
+  active.current = { epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl }
   const base = `/tenants/${tenant}/workspaces/${workspace}`, runtimePath = `${base}/runtimes/${runtime}`
+  const replay = sharedReplay ?? localReplay.current
+  const eventScope = `${snapshot.serverUrl}:${snapshot.epoch}:${base}/sessions/${session}`
+  const events = replay.read(eventScope).events
   const activity = useActivities(value => value[base])
   const operation = activity?.operation
   const binding = bindingState?.scope === `${base}/sessions/${session}` && bindingState.epoch === snapshot.epoch ? bindingState.binding : null
   const usable = snapshot.mode === 'cloud' && !busy
 
-  useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage(''); setEvents([]) }, [snapshot.epoch, tenant, workspace])
+  useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage(''); setEventVersion(value => value + 1) }, [snapshot.epoch, tenant, workspace])
   useEffect(() => { setResult(null); setTenants([]); setWorkspaces([]) }, [snapshot.epoch])
   useEffect(() => { setResult(null) }, [tenant, workspace])
   useEffect(() => { setRuntimes([]); setSessions([]); setCredentials([]); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
-  useEffect(() => () => { generation.current++; transfer.current?.abort() }, [])
+  useEffect(() => () => { generation.current++; active.current = { ...active.current, mode: 'local' }; transfer.current?.abort() }, [])
 
   const request = (target: string, method: CloudRequest['method'] = 'GET', body: CloudValue = null, key: string | null = null) =>
     call({ epoch: snapshot.epoch, path: target, method, body, idempotencyKey: key })
+  const exportCurrent = () => active.current.epoch === snapshot.epoch && active.current.tenant === tenant
+    && active.current.workspace === workspace && active.current.mode === 'cloud' && active.current.serverUrl === snapshot.serverUrl
+  const exportScope = async (): Promise<BotSyncScope> => {
+    const info = record(await request('/server-info'))
+    if (record(info.capabilities ?? null).workspaceBots !== true) throw new Error('WORKSPACE_BOTS_UNSUPPORTED')
+    const me = record(await request('/me'))
+    if (!text(info.serverId) || !text(me.id) || !exportCurrent()) throw new Error('BOT_EXPORT_SCOPE_CHANGED')
+    return { serverUrl: snapshot.serverUrl, serverId: text(info.serverId), userId: text(me.id), tenantId: tenant, workspaceId: workspace }
+  }
+  const previewBot = async (botId: string): Promise<BotExportPreview> => {
+    if (!tenant || !workspace || exportLocal === undefined || !exportCurrent()) throw new Error('LOCAL_BOT_EXPORT_UNAVAILABLE')
+    const source = await exportLocal({ kind: 'bot', epoch: snapshot.epoch, botId })
+    if (!source.exportable || source.definition === undefined) throw new Error(source.reason ?? 'LOCAL_BOT_NOT_EXPORTABLE')
+    const scope = await exportScope(), definition = canonicalBotDefinition(source.definition)
+    const contentSha256 = await definitionDigest(definition)
+    const sync = findBotSyncRecord(scope, botId), attempt = findBotExportAttempt(scope, botId)
+    let status: BotExportPreview['status'] = 'new'
+    let currentSync = sync
+    if (sync !== undefined) {
+      status = 'unknown'
+      try {
+        const meta = record(await request(`${base}/bots/${sync.cloudBotId}`))
+        if (meta.state === 'archived') status = 'archived'
+        else if (meta.state === 'active' && Number.isSafeInteger(meta.version) && Number(meta.version) > 0) {
+          const latest = record(await request(`${base}/bots/${sync.cloudBotId}/revisions/${sync.cloudRevision}`))
+          if (meta.latestRevision !== sync.cloudRevision || record(latest.source ?? null).contentSha256 !== sync.contentSha256) status = 'cloud-updated'
+          else {
+            currentSync = { ...sync, cloudVersion: Number(meta.version) }
+            status = contentSha256 === sync.contentSha256 ? 'synced' : 'local-updated'
+          }
+        }
+      } catch { status = 'unknown' }
+    }
+    if (attempt !== undefined && status !== 'archived') {
+      status = attempt.contentSha256 === contentSha256 && attempt.cloudBotId === (sync?.cloudBotId ?? '') ? 'pending' : 'unknown'
+      if (sync !== undefined) currentSync = { ...sync, cloudVersion: attempt.expectedVersion }
+    }
+    if (!exportCurrent()) throw new Error('BOT_EXPORT_SCOPE_CHANGED')
+    return { scope, definition, source: { kind: 'local-export', localBotId: botId, exportVersion: 1,
+      exportedAt: attempt?.exportedAt ?? new Date().toISOString(), contentSha256 }, status,
+    ...(currentSync === undefined ? {} : { sync: currentSync }) }
+  }
+  const exportBot = async (botId: string, preview: BotExportPreview): Promise<BotSyncRecord> => {
+    if (preview.source.localBotId !== botId || !exportCurrent()) throw new Error('LOCAL_EXPORT_PREVIEW_MISMATCH')
+    // Re-read the full public definition on confirmation; private or changed Bots require a new preview.
+    const checked = await previewBot(botId)
+    if (!sameBotSyncScope(checked.scope, preview.scope) || checked.source.contentSha256 !== preview.source.contentSha256
+      || checked.sync?.cloudBotId !== preview.sync?.cloudBotId || checked.sync?.cloudVersion !== preview.sync?.cloudVersion
+      || preview.status === 'synced' || checked.status === 'synced' || checked.status === 'unknown' || checked.status === 'archived' || checked.status === 'cloud-updated') throw new Error('BOT_EXPORT_REVIEW_REQUIRED')
+    const sync = preview.sync
+    const attempt = reserveBotExportAttempt({ ...preview.scope, localBotId: botId, cloudBotId: sync?.cloudBotId ?? '',
+      expectedVersion: sync?.cloudVersion ?? 0, contentSha256: preview.source.contentSha256,
+      exportedAt: preview.source.exportedAt, idempotencyKey: randomUUID() })
+    const definition = { ...canonicalBotDefinition(preview.definition), requiredCapabilities: [...preview.definition.requiredCapabilities] }
+    const source = { ...preview.source, exportedAt: attempt.exportedAt }
+    const body = sync === undefined ? { definition, source } : { expectedVersion: attempt.expectedVersion, definition, source }
+    if (!exportCurrent()) throw new Error('BOT_EXPORT_SCOPE_CHANGED')
+    const target = sync === undefined ? `${base}/bots` : `${base}/bots/${sync.cloudBotId}/revisions`
+    let receipt: ReturnType<typeof record>
+    try { receipt = record(await request(target, 'POST', body, attempt.idempotencyKey)) }
+    catch (error) {
+      if (error instanceof Error && ['BOT_VERSION_CONFLICT', 'BOT_ARCHIVED', 'BOT_NOT_FOUND', 'WORKSPACE_ARCHIVED'].includes(error.message)) rejectBotExportAttempt(attempt)
+      throw error
+    }
+    const cloudBotId = text(receipt.botId) || text(receipt.id)
+    const cloudRevision = Number(receipt.revision ?? receipt.latestRevision)
+    const cloudVersion = sync === undefined ? Number(receipt.version) : attempt.expectedVersion + 1
+    if (sync !== undefined && (cloudBotId !== sync.cloudBotId || cloudRevision !== sync.cloudRevision + 1)) throw new Error('INVALID_BOT_SYNC_RECEIPT')
+    const result: BotSyncRecord = { ...preview.scope, localBotId: botId, cloudBotId, cloudRevision, cloudVersion,
+      contentSha256: preview.source.contentSha256, syncedAt: new Date().toISOString() }
+    saveBotSyncRecord(result)
+    if (exportCurrent()) { setResult(receipt); actions.section('agent') }
+    return result
+  }
   const task = (action: (current: () => boolean) => Promise<void>) => () => {
     void (async () => {
       const id = ++generation.current, epoch = snapshot.epoch, selected = workspace, selectedTenant = tenant
       const current = () => generation.current === id && active.current.epoch === epoch
-        && active.current.workspace === selected && active.current.tenant === selectedTenant
+        && active.current.workspace === selected && active.current.tenant === selectedTenant && active.current.mode === 'cloud' && active.current.serverUrl === snapshot.serverUrl
       setBusy(true); setFailed(false)
       try { await action(current) } catch { if (current()) setFailed(true) }
       finally { if (current()) setBusy(false) }
@@ -96,6 +182,19 @@ export function CloudPanel({
     const value = await request(`${base}/sessions/${sessionId}/binding`)
     const parsed = readBinding(value, { serverId: text(info.serverId), tenantId: tenant, workspaceId: workspace, sessionId })
     if (current()) setBinding({ scope: `${base}/sessions/${sessionId}`, epoch: snapshot.epoch, binding: parsed })
+    if (current()) await loadSessionEvents(sessionId, current)
+  }
+  const readSessionPage = async (sessionId: string, current: () => boolean): Promise<number> => {
+    const scope = `${snapshot.serverUrl}:${snapshot.epoch}:${base}/sessions/${sessionId}`
+    const before = replay.read(scope).after
+    const page = await request(`${base}/sessions/${sessionId}/events?after=${before}`)
+    if (!current() || active.current.session !== sessionId) return 0
+    replay.accept(scope, before, page)
+    setEventVersion(value => value + 1)
+    return Array.isArray(record(page).items) ? (record(page).items as CloudValue[]).length : 0
+  }
+  const loadSessionEvents = async (sessionId: string, current: () => boolean) => {
+    for (let count = 0; count < 20 && current(); count++) if (await readSessionPage(sessionId, current) < 100) return
   }
   const refresh = async (current: () => boolean, includeBinding = true) => {
     const values = await Promise.all(['/runtimes', '/model-credentials', '/sessions', '/desktops', '/objects'].map(suffix => request(base + suffix)))
@@ -115,18 +214,7 @@ export function CloudPanel({
     accepted(base, key, { path: pollBase, id })
     if (!current()) return
     setResult(receipt)
-    let after = '0'
-    if (sessionId !== undefined) setEvents([])
-    const readEvents = async (): Promise<number> => {
-      const page = record(await request(`${base}/sessions/${sessionId}/events?after=${after}`))
-      if (!current()) return 0
-      const items = Array.isArray(page.items) ? page.items : []
-      const next = text(page.nextAfter)
-      if (items.length > 0 && (!next || next === after)) throw new Error('INVALID_EVENT_CURSOR')
-      after = next || after
-      setEvents(previous => [...previous, ...items.map(item => record(item).event ?? null)].slice(-2000))
-      return items.length
-    }
+    const readEvents = () => sessionId === undefined ? Promise.resolve(0) : readSessionPage(sessionId, current)
     for (let count = 0; count < 660 && current(); count++) {
       if (sessionId !== undefined) await readEvents()
       const settled = record(await request(`${pollBase}/operations/${id}`))
@@ -164,9 +252,11 @@ export function CloudPanel({
       {locked && <Button variant="outline" disabled={busy} onClick={task(async () => { await logout() })}>{t('logout')}</Button>}
       {snapshot.authorizationUrl !== null && <a href={snapshot.authorizationUrl} target="_blank" rel="noopener noreferrer">{t('authorize')}</a>}
       <p role="status" className={`${css.notice} ${failed || snapshot.error !== null ? css.error : ''}`}>
-        {failed ? t('failure') : snapshot.mode === 'cloud-suspended' ? t('localBlocked') : busy ? t('waiting') : t(snapshot.mode)}
+        {failed ? t('failure') : snapshot.error === 'CLOUD_PROTOCOL_UNSUPPORTED' ? t('protocolUnsupported') : snapshot.mode === 'cloud-suspended' ? t('localBlocked') : busy ? t('waiting') : t(snapshot.mode)}
       </p>
-      {(snapshot.mode === 'cloud' || snapshot.mode === 'cloud-suspended') && <LocalArchive key={snapshot.epoch} t={t} epoch={snapshot.epoch} read={readLocal} cloudAvailable={snapshot.mode === 'cloud'} openCloud={() => { actions.section('agent') }} />}
+      {(snapshot.mode === 'cloud' || snapshot.mode === 'cloud-suspended') && <LocalArchive key={`${snapshot.serverUrl}:${snapshot.epoch}:${tenant}:${workspace}`} t={t} epoch={snapshot.epoch} read={readLocal}
+        {...(workspace !== '' && usable && exportLocal !== undefined ? { previewBot, exportBot } : {})}
+        cloudAvailable={snapshot.mode === 'cloud'} openCloud={() => { actions.section('agent') }} />}
       {snapshot.mode === 'cloud' && <>
         <section className={css.context}>
           <h3>{t('workspace')}</h3>
@@ -178,6 +268,10 @@ export function CloudPanel({
         <nav className={css.tabs} aria-label={t('sections')}>{(['overview', 'agent', 'files', 'desktop', 'tasks', 'settings'] as const).map(item =>
           <button key={item} type="button" aria-current={section === item ? 'page' : undefined} onClick={() => { actions.section(item) }}>{t(item)}</button>,
         )}</nav>
+        {renderSection('settings', t('compatibility'), <>
+          <p className={css.notice}>{t('compatibilityHint')}</p>
+          {button(t('checkCompatibility'), async (current) => { const data = await request('/server-info'); if (current()) setResult(data) })}
+        </>)}
         {renderSection('settings', t('organization'), <div className={css.group}>{field(t('name'), name, setName)}{field(t('slug'), slug, setSlug)}
           {button(t('createTenant'), async (current) => { const data = await request('/tenants', 'POST', { name, slug }, randomUUID()); if (current()) setResult(data) }, !!name && !!slug)}
           {button(t('createWorkspace'), async (current) => { const data = await request(`/tenants/${tenant}/workspaces`, 'POST', { name, slug }, randomUUID()); if (current()) setResult(data) }, !!tenant && !!name && !!slug)}
@@ -220,11 +314,11 @@ export function CloudPanel({
               {button(t('saveCredential'), async (current) => { const secret = apiKey; setApiKey(''); const data = await request(base + '/model-credentials', 'POST', { endpoint, model, apiKey: secret }); if (current()) { setResult(data); await refresh(current) } }, !!apiKey && !!model)}</div>
           </>)}
           {renderSection('agent', t('session'), <>
-            <div className={css.group}>{select(t('credential'), credential, setCredential, credentials)}{select(t('sessionDesktop'), desktop, setDesktop, desktops.filter(item => item.runtimeId === runtime))}{select(t('session'), session, (value) => { setSession(value); setBinding(null); setEvents([]) }, sessions)}
-              {button(t('createSession'), async (current) => { const data = await request(base + '/sessions', 'POST', { runtimeId: runtime, credentialId: credential, ...(desktop ? { desktopId: desktop } : {}), title: name || t('session') }, randomUUID()); if (current()) { const id = text(record(data).id); setSession(id); setBinding(null); setResult(data); await refresh(current, false); if (current()) await loadBinding(id, current) } }, !!runtime && !!credential && (!desktop || desktops.some(item => item.id === desktop && item.runtimeId === runtime)))}</div>
+            <div className={css.group}>{select(t('credential'), credential, setCredential, credentials)}{select(t('sessionDesktop'), desktop, setDesktop, desktops.filter(item => item.runtimeId === runtime))}{select(t('session'), session, (value) => { setSession(value); setBinding(null); setEventVersion(value => value + 1) }, sessions)}
+              {button(t('createSession'), async (current) => { const data = await request(base + '/sessions', 'POST', { runtimeId: runtime, credentialId: credential, ...(desktop ? { desktopId: desktop } : {}), title: name || t('session') }, randomUUID()); if (current()) { const id = text(record(data).id); setEventVersion(value => value + 1); setSession(id); setBinding(null); setResult(data); await refresh(current, false); if (current()) await loadBinding(id, current) } }, !!runtime && !!credential && (!desktop || desktops.some(item => item.id === desktop && item.runtimeId === runtime)))}</div>
             <label className={css.field}>{t('prompt')}<textarea value={prompt} onChange={(event) =>{  setPrompt(event.target.value) }} disabled={!usable} maxLength={16000} /></label>
             {button(t('send'), current => queued(`${base}/sessions/${session}/prompts`, { prompt, timeoutSeconds: 180, expectedBindingRevision: binding?.bindingRevision ?? 0 }, current, session), binding !== null && binding.state === 'active' && !!session && !!prompt)}
-            <pre aria-label={t('events')} className={css.output}>{events.map(event => JSON.stringify(event)).join('\n')}</pre>
+            <CloudSessionTimeline states={{ running: t('eventRunning'), succeeded: t('eventSucceeded'), failed: t('eventFailed'), interrupted: t('eventInterrupted') }} detailsLabel={t('eventDetails')} label={t('events')} events={events} labels={{ user: t('userMessage'), assistant: t('assistantMessage'), tool: t('toolMessage'), status: t('statusMessage'), error: t('errorMessage'), unknown: t('unknownMessage') }} />
           </>)}
           {renderSection('overview', t('command'), <div className={css.group}>{field(t('command'), command, setCommand)}{button(t('execute'), current => queued(runtimePath + '/commands', { command, timeoutSeconds: 30 }, current), !!runtime && !!command)}</div>)}
           {renderSection('files', t('files'), <>
@@ -232,6 +326,7 @@ export function CloudPanel({
             <label className={css.field}>{t('content')}<textarea value={content} onChange={(event) =>{  setContent(event.target.value) }} disabled={!usable} /></label>
             {button(t('write'), (current) => { const bytes = new TextEncoder().encode(content); if (bytes.length > 16384) throw new Error('FILE_TOO_LARGE'); return queued(runtimePath + '/files', { action: 'write', path, content: btoa(String.fromCharCode(...bytes)) }, current) }, !!runtime)}
           </>)}
+          {section === 'files' && <CloudArtifacts key={`${snapshot.serverUrl}:${snapshot.epoch}:${base}`} t={t} scope={base} result={result} receipts={sharedArtifacts ?? localArtifacts.current} enabled={usable} call={request} />}
           {renderSection('files', t('storage'), <>
             <p className={css.notice}>{t('uploadHint')}</p>
             <div className={css.group}><label className={css.field}>{t('files')}<input type="file" disabled={!usable} onChange={(event) =>{  setFile(event.target.files?.[0]) }} /></label>
@@ -262,6 +357,16 @@ export function CloudPanel({
               {button(t('createDesktop'), async (current) => { const data = await request(base + '/desktops', 'POST', { runtimeId: runtime }); if (current()) { setDesktop(text(record(data).id)); setResult(data); await refresh(current) } }, !!runtime)}
               {button(t('desktopStart'), current => queued(`${base}/desktops/${desktop}/lifecycle`, { action: 'start' }, current), !!desktop && !!runtime)}
               {button(t('desktopStop'), current => queued(`${base}/desktops/${desktop}/lifecycle`, { action: 'stop' }, current), !!desktop && !!runtime)}
+              {button(t('connectDesktop'), async (current) => {
+                const popup = window.open('about:blank', '_blank'); if (!popup) throw Error('POPUP_BLOCKED'); popup.opener = null
+                try {
+                  const value = record(await request(`${base}/desktops/${desktop}/viewer`, 'POST'))
+                  if (!current()) { popup.close(); return }
+                  const target = new URL(text(value.viewerUrl))
+                  if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || target.username || target.password || !/^\/[a-f0-9]{64}\/$/.test(target.pathname)) throw Error('INVALID_VIEWER_URL')
+                  popup.location.href = target.href
+                } catch (error) { popup.close(); throw error }
+              }, !!desktop)}
               {button(t('screenshot'), current => queued(`${base}/desktops/${desktop}/computer`, { action: 'screenshot' }, current), !!desktop && !!runtime)}</div>
             {image !== '' && <img className={css.image} src={image} alt={t('desktopAlt')} />}
             <div className={css.group}>{field(t('text'), desktopText, setDesktopText)}{button(t('type'), current => queued(`${base}/desktops/${desktop}/computer`, { action: 'type', text: desktopText }, current), !!desktop && !!runtime && !!desktopText)}</div>

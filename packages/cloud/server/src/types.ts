@@ -50,6 +50,24 @@ export interface LocalBotReadOnly {
    */
   list(offset: number, limit: number): { ready: boolean; items: LocalBotSummary[]; nextOffset: number | null }
 }
+/** Complete declarative definition for an explicit public cloud export. */
+export interface LocalBotExport {
+  readonly version: 1
+  get(botId: LocalBotId): LocalBotExportResult
+}
+export interface LocalBotExportDefinition {
+  readonly schemaVersion: 1
+  readonly name: string
+  readonly role: string
+  readonly instructions: string
+  readonly requiredCapabilities: readonly string[]
+}
+export interface LocalBotExportResult {
+  readonly version: 1
+  readonly exportable: boolean
+  readonly reason?: 'NOT_READY' | 'NOT_FOUND' | 'PRIVATE_BOT' | 'TOO_LARGE' | 'INVALID'
+  readonly definition?: LocalBotExportDefinition
+}
 /** Text-only page; raw events and attachments never cross to the Client. */
 export type LocalReadResult =
   | { kind: 'sessions'; items: { id: SessionId; createdAt: number }[]; nextOffset: number | null }

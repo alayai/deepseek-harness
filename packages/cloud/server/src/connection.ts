@@ -1,4 +1,5 @@
 /** Host execution target and all asynchronous login/request ownership. */
+import { requireCloudProtocol } from './compatibility.ts'
 import { nativeLogin } from './login.ts'
 import { CloudApiError, serverOrigin, type ServerTransport } from './transport.ts'
 import type { CloudRequest, CloudSnapshot, CloudValue } from './types.ts'
@@ -13,6 +14,7 @@ export class CloudConnection {
   private expiry: ReturnType<typeof setTimeout> | undefined
   private closed = false
   private leaving: Promise<CloudSnapshot> | undefined
+  private viewers = 0
   private readonly pending = new Set<Promise<CloudValue>>()
 
   constructor(private readonly drain: (signal: AbortSignal) => Promise<void>, private readonly authenticate = nativeLogin) {}
@@ -30,7 +32,7 @@ export class CloudConnection {
     if (this.closed || this.leaving !== undefined || this.login !== undefined || this.state.mode === 'cloud') throw new CloudApiError('CLOUD_BUSY', 409)
     const serverUrl = serverOrigin(input)
     if (this.expiry !== undefined) clearTimeout(this.expiry)
-    this.lifetime.abort()
+    this.lifetime.abort(); this.viewers = 0
     this.lifetime = new AbortController()
     const controller = new AbortController(), epoch = this.state.epoch + 1
     this.state = { mode: 'authenticating', epoch, serverUrl, authorizationUrl: null, error: null }
@@ -60,6 +62,7 @@ export class CloudConnection {
       const execution = info !== null && typeof info === 'object' && !Array.isArray(info) ? info.execution : null
       if (execution === null || typeof execution !== 'object' || Array.isArray(execution)
         || execution.authenticatedMode !== 'cloud' || execution.localFallback !== false) throw new CloudApiError('UNSAFE_SERVER_POLICY', 409)
+      requireCloudProtocol(info)
       if (!this.current(epoch) || controller.signal.aborted) return
       this.transport = result.transport
       this.state = { ...this.state, mode: 'cloud', authorizationUrl: null }
@@ -78,7 +81,7 @@ export class CloudConnection {
    */
   suspend(code: string): void {
     if (this.state.mode === 'local') return
-    this.lifetime.abort()
+    this.lifetime.abort(); this.viewers = 0
     this.state = { ...this.state, mode: 'cloud-suspended', epoch: this.state.epoch + 1, authorizationUrl: null, error: code }
   }
 
@@ -88,7 +91,17 @@ export class CloudConnection {
    */
   async request(request: CloudRequest): Promise<CloudValue> {
     if (!this.current(request.epoch) || this.state.mode !== 'cloud' || this.transport === undefined) throw new CloudApiError('CLOUD_TARGET_BLOCKED', 409)
-    const pending = this.transport.request(request, this.lifetime.signal)
+    const viewer = request.method === 'POST' && request.path.endsWith('/viewer')
+    if (viewer && this.viewers >= 4) throw new CloudApiError('DESKTOP_VIEWER_LIMIT', 409)
+    if (viewer) this.viewers++
+    const lifetime = this.lifetime
+    let released = false
+    const releaseViewer = () => {
+      if (!released && lifetime === this.lifetime) { this.viewers = Math.max(0, this.viewers - 1); released = true }
+    }
+    const pending = viewer ? this.transport.desktopViewer(request.path.slice(0, -7), this.lifetime.signal, releaseViewer)
+      .catch((error: unknown) => { releaseViewer(); throw error })
+      : this.transport.request(request, this.lifetime.signal)
     this.pending.add(pending)
     try {
       const value = await pending
@@ -135,7 +148,7 @@ export class CloudConnection {
   /** Withdraw listeners only after all owned continuations have settled. */
   async dispose(): Promise<void> {
     this.closed = true
-    this.lifetime.abort()
+    this.lifetime.abort(); this.viewers = 0
     this.login?.controller.abort()
     if (this.expiry !== undefined) clearTimeout(this.expiry)
     await this.login?.done

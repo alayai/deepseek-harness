@@ -86,6 +86,8 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'dshCloud/beginLogin': 'owner-only',
   'dshCloud/request': 'owner-only',
   'dshCloud/logout': 'owner-only',
+  'dshCloud/readLocal': 'owner-only',
+  'dshCloud/exportLocal': 'owner-only',
   'account/ackBonusNotified': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/cancelSignIn': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/getBalance': 'owner-only', // owner account and sign-in; the served page never reads it

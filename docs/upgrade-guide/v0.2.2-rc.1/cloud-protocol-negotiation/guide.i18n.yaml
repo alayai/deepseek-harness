@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.1/cloud-protocol-negotiation/guide.md
+/:
+  en: 0135513e2c5a157b
+  zh: a39ea503e45229a7
+/cloud-login-requires-protocol-1:
+  en: 80cd1cc844333871
+  zh: baf22a89e02088de
+/cloud-login-requires-protocol-1/change:
+  en: 9c2bcd1a6eeff3a1
+  zh: ee161e9676e85091
+/cloud-login-requires-protocol-1/migration:
+  en: b4a619c0a89aa698
+  zh: fbabedc78676a19d
