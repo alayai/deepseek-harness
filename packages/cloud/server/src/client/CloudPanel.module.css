@@ -21,17 +21,6 @@
 .notice { min-height: 20px; font-size: 13px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
 .error { color: var(--dsw-alias-state-error-primary); }
 .output { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.timeline { display: grid; gap: 8px; max-height: 360px; overflow: auto; margin: 0; padding: 0; list-style: none; font-size: 13px; }
-.message { min-width: 0; }
-.timeline li { display: grid; gap: 4px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.timeline article { display: grid; gap: 6px; min-width: 0; }
-.timeline header { display: flex; justify-content: space-between; gap: 8px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
-.timeline p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.messageUser { margin-left: 16px; background: var(--dsw-alias-bg-layer-2); }
-.messageAssistant { margin-right: 16px; }
-.messageTool { border-style: dashed; }
-.messageStatus { color: var(--dsw-alias-label-secondary); }
-.messageError { border-color: var(--dsw-alias-state-error-primary); }
 .image { display: block; max-width: 100%; height: auto; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; overflow-wrap: anywhere; }
 @media (pointer: coarse) {

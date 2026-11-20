@@ -15,7 +15,7 @@ function props(mode: CloudSnapshot['mode'] = 'local', epoch = 8): CloudPanelProp
   const input: CloudPanelProps = {
     useView: bindSnapshotSelector(store), viewActions: store.actions,
     useActivities: bindSnapshotSelector(activities.source), remember: activities.remember, accepted: activities.accepted,
-    t: makeTranslate(zh), useCloud: <T,>(select: (value: CloudSnapshot) => T) => select(snapshot),
+    openChat: vi.fn(), t: makeTranslate(zh), useCloud: <T,>(select: (value: CloudSnapshot) => T) => select(snapshot),
     readLocal: vi.fn(async () => ({ kind: 'sessions' as const, items: [], nextOffset: null })), exportLocal: vi.fn(async () => ({ version: 1 as const, exportable: false, reason: 'NOT_READY' as const })), login: vi.fn(async () => {}), logout: vi.fn(async () => {}), call: vi.fn(async () => null),
   }
   return input
@@ -76,22 +76,21 @@ describe('cloud workspace UI', () => {
     expect(screen.getByRole('button', { name: '取消任务' }).hasAttribute('disabled')).toBe(true)
     expect(screen.queryByRole('textbox', { name: '云端命令' })).toBeNull()
   })
-  it('drains terminal event pages and replaces replayed history on the next prompt', async () => {
+  it('opens the main chat and pins a selected Bot when creating a cloud session', async () => {
     const input = props('cloud')
-    const firstPage = Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'assistant/message', data: { text: `event-${i}` } } }))
     vi.mocked(input.call).mockImplementation(async (request) => {
-      if (request.path === '/server-info') return { serverId: '10000000-0000-4000-8000-000000000010' }
+      if (request.path === '/server-info') return { serverId: '10000000-0000-4000-8000-000000000010', capabilities: { workspaceBots: true } }
+      if (request.path.endsWith('/bots?limit=100')) return { items: [
+        { id: 'bot-first', state: 'active', latestRevision: 3, name: 'Fixture Bot' },
+        { id: 'bot-archived', state: 'archived', latestRevision: 1, name: 'Archived' },
+      ] }
+      if (request.path.endsWith('/model-credentials')) return [{ id: '10000000-0000-4000-8000-000000000005', name: 'Fixture model' }]
+      if (request.path.endsWith('/sessions') && request.method === 'POST') return { id: '10000000-0000-4000-8000-000000000004' }
       if (request.path.endsWith('/binding')) return { schemaVersion: 1, serverId: '10000000-0000-4000-8000-000000000010', tenantId: '10000000-0000-4000-8000-000000000001', workspaceId: '10000000-0000-4000-8000-000000000002', cloudSessionId: '10000000-0000-4000-8000-000000000004', runtimeId: '10000000-0000-4000-8000-000000000003', credentialRef: '10000000-0000-4000-8000-000000000005', desktopId: null, bindingRevision: 7, state: 'active' }
       if (request.path === '/me/tenants') return [{ id: '10000000-0000-4000-8000-000000000001', name: 'Team' }]
       if (request.path === '/tenants/10000000-0000-4000-8000-000000000001/workspaces') return { items: [{ id: '10000000-0000-4000-8000-000000000002', name: 'Workspace' }] }
       if (request.path.endsWith('/runtimes')) return { resources: [{ id: '10000000-0000-4000-8000-000000000003', name: 'Sandbox' }, { id: '10000000-0000-4000-8000-000000000006', name: 'Browsing sandbox' }] }
       if (request.path.endsWith('/sessions')) return { items: [{ id: '10000000-0000-4000-8000-000000000004', name: 'Conversation', runtimeId: '10000000-0000-4000-8000-000000000003' }] }
-      if (request.path.endsWith('/prompts')) return { id: 'o', runtimeId: '10000000-0000-4000-8000-000000000003', state: 'queued' }
-      if (request.path.endsWith('/operations/o')) return { id: 'o', state: 'succeeded' }
-      if (request.path.endsWith('/events?after=0')) return { items: firstPage, nextAfter: '100' }
-      if (request.path.endsWith('/events?after=100')) return { items: firstPage.map((_, i) => ({ id: String(i + 101), operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'assistant/message', data: { text: `event-${i + 100}` } } })), nextAfter: '200' }
-      if (request.path.endsWith('/events?after=200')) return { items: [{ id: '201', operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'turn/end', data: { reason: { kind: 'completed' } } } }], nextAfter: '201' }
-      if (request.path.endsWith('/events?after=201')) return { items: [], nextAfter: '201' }
       return []
     })
     render(<CloudPanel {...input} />)
@@ -105,22 +104,25 @@ describe('cloud workspace UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '会话' }))
     await screen.findByRole('option', { name: 'Conversation' })
     fireEvent.change(screen.getByRole('combobox', { name: '云端会话' }), { target: { value: '10000000-0000-4000-8000-000000000004' } })
-    expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByRole('button', { name: zh.send })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '刷新会话绑定' }))
     await screen.findByText('绑定已启用 · 版本 7')
     fireEvent.change(screen.getByRole('combobox', { name: '云端沙箱' }), { target: { value: '10000000-0000-4000-8000-000000000006' } })
     expect(screen.getByText(zh.browsingResource)).toBeTruthy()
-    expect(screen.getByRole('region', { name: zh.binding }).textContent).toMatchSnapshot()
-    fireEvent.change(screen.getByRole('textbox', { name: '发送给云端 DSH 的消息' }), { target: { value: 'hello' } })
-    for (let i = 0; i < 2; i++) {
-      fireEvent.click(screen.getByRole('button', { name: '发送' }))
-      await waitFor(() =>{  expect(screen.getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false) })
-      const output = screen.getByLabelText(zh.events)
-      expect(output.textContent).toContain('Turn ended: completed')
-      expect(output.querySelectorAll('li')).toHaveLength(201)
-    }
-    expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ body: { prompt: 'hello', timeoutSeconds: 180, expectedBindingRevision: 7 } }))
-    expect(input.call).toHaveBeenCalledWith(expect.objectContaining({ path: '/tenants/10000000-0000-4000-8000-000000000001/workspaces/10000000-0000-4000-8000-000000000002/runtimes/10000000-0000-4000-8000-000000000003/operations/o' }))
+    const bindingSummary = screen.getByRole('region', { name: zh.binding })
+    expect(bindingSummary.textContent).toContain('10000000-0000-4000-8000-000000000003')
+    expect(bindingSummary.textContent).not.toContain('10000000-0000-4000-8000-000000000006')
+    fireEvent.click(screen.getByRole('button', { name: zh.openCloudConversation }))
+    expect(input.openChat).toHaveBeenCalledOnce()
+    await screen.findByRole('option', { name: 'Fixture Bot · 版本 3' })
+    expect(screen.queryByRole('option', { name: /Archived/ })).toBeNull()
+    fireEvent.change(screen.getByRole('combobox', { name: zh.chatBotOptional }), { target: { value: 'bot-first' } })
+    fireEvent.change(screen.getByRole('combobox', { name: zh.credential }), { target: { value: '10000000-0000-4000-8000-000000000005' } })
+    fireEvent.click(screen.getByRole('button', { name: zh.createSession }))
+    await waitFor(() => {
+      const request = vi.mocked(input.call).mock.calls.find(([entry]) => entry.method === 'POST' && entry.path.endsWith('/sessions'))
+      expect(request?.[0].body).toMatchObject({ bot: { id: 'bot-first', revision: 3 } })
+    })
   })
   it('retains late acceptance after closing the panel and queries the original task without resubmitting', async () => {
     const input = props('cloud'), pending = Promise.withResolvers<CloudValue>()

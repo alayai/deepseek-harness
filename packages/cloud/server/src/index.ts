@@ -17,9 +17,6 @@ import type { CloudRequest, CloudSnapshot, CloudValue, LocalBotExportResult, Loc
 declare module '@deepseek-ai/cordis' {
   interface Context { dshCloud: DshCloudService }
 }
-declare module '@deepseek-ai/dsh-typert-protocol' {
-  interface RemoteErrorDetailsMap { 'cloud/blocked': { readonly reason: string } }
-}
 
 /** Local display, directory management, and read-only navigation remain available without enabling local execution. */
 function allowsLocalManagement(namespace: string, method: string): boolean {

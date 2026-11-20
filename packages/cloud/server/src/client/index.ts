@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-cloud-server/remote'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -11,13 +12,15 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { LocalBotExportResult } from '../types.ts'
 import { IconGlobeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { CloudChat } from './CloudChat.tsx'
+import { CloudChatTurns, CloudRequestFailure } from './chat-turns.ts'
 import { CloudPanel, type CloudPanelInjected } from './CloudPanel.tsx'
 import { createCloudSource } from './source.ts'
 import { createCloudViewStore } from './view-store.ts'
 import { CloudArtifactReceipts } from './CloudArtifacts.tsx'
 import { CloudSessionReplay } from './session-replay.ts'
 import { createCloudActivities } from './activity.ts'
-import { CloudEntry, CloudIcon, CloudTabTitle } from './CloudEntry.tsx'
+import { CloudComposer, CloudEntry, CloudIcon, CloudTabTitle } from './CloudEntry.tsx'
 import { en, zh } from './locales.ts'
 
 export const inject = ['remote', 'slots', 'locale', 'connection', 'layout', 'sidebarRight', 'sidebarRightTabs']
@@ -39,29 +42,41 @@ function registerUi(ctx: Context): void {
   const activities = createCloudActivities()
   const replay = new CloudSessionReplay()
   const artifacts = new CloudArtifactReceipts()
+  const turns = new CloudChatTurns()
   let popup: Window | null = null
   const source = createCloudSource(async () => {
     const result = await ctx.remote.dshCloud.state()
     if (!result.ok) throw new Error(result.error.code)
     return result.value
   })
-  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear() }, 'cloud: client lifetime')
-  let previous = source.source.getSnapshot().mode
+  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear(); turns.clear() }, 'cloud: client lifetime')
+  let previous = source.source.getSnapshot()
   ctx.effect(() => source.source.subscribe(() => {
     const snapshot = source.source.getSnapshot(), mode = snapshot.mode
     if (snapshot.authorizationUrl !== null && popup !== null) {
       popup.location.href = snapshot.authorizationUrl
       popup = null
     }
-    if ((mode === 'local' || mode === 'authenticating') && mode !== previous) {
+    if ((mode === 'local' || mode === 'authenticating') && mode !== previous.mode) {
       store.actions.reset()
       activities.clear(); replay.clear(); artifacts.clear()
     }
-    if (mode === 'local' && previous !== 'local') connection.reconnect()
-    previous = mode
+    if (mode === 'local') turns.clear()
+    if (snapshot.serverUrl !== previous.serverUrl || snapshot.epoch !== previous.epoch) replay.clear()
+    if (mode === 'local' && previous.mode !== 'local') connection.reconnect()
+    previous = snapshot
   }), 'cloud: resume local subscriptions')
+  const call: CloudPanelInjected['call'] = async (input) => {
+    const result = await ctx.remote.dshCloud.request(input)
+    if (!result.ok) {
+      void source.refresh()
+      throw new CloudRequestFailure(result.error.code === 'cloud/blocked' ? result.error.details.reason : result.error.code)
+    }
+    return result.value
+  }
+  const goToChat = () => { ctx.layout.selectPanel(null) }
   const injectPanel = (): CloudPanelInjected => ({
-    replay, artifacts,
+    artifacts, openChat: goToChat,
     hooks: { cloud: source.source, activities: activities.source, view: store },
     viewActions: store.actions,
     remember: activities.remember,
@@ -89,18 +104,46 @@ function registerUi(ctx: Context): void {
     exportLocal: async (input) => {
       const result = await (ctx.remote.dshCloud as typeof ctx.remote.dshCloud & DshCloudRemote).exportLocal(input)
       if (!result.ok) throw new Error(result.error.code)
-      return result.value as LocalBotExportResult
-    },
-    call: async (input) => {
-      const result = await ctx.remote.dshCloud.request(input)
-      if (!result.ok) { await source.refresh(); throw new Error(result.error.code) }
       return result.value
     },
+    call,
   })
   const open = (): void => {
     if (ctx.sidebarRight.mounted.getSnapshot() !== undefined) ctx.sidebarRight.openTab(TAB_KIND)
     else ctx.layout.selectPanel(PANEL_ID)
   }
+  const openResources = () => {
+    store.actions.section('agent')
+    open()
+  }
+  const override = (register: () => () => void) => {
+    let release: (() => void) | undefined
+    const sync = () => {
+      if (source.observed && source.source.getSnapshot().mode === 'local') {
+        release?.()
+        release = undefined
+      } else {
+        release ??= register()
+      }
+    }
+    sync()
+    const unsubscribe = source.source.subscribe(sync)
+    return () => { unsubscribe(); release?.() }
+  }
+  ctx.effect(() => ctx.slots.inject('main.conversation', () => override(() => ctx.slots.register({
+    name: 'main.conversation', priority: -1, locale: 'dsh.cloud',
+    inject: () => ({
+      hooks: { cloud: source.source, view: store },
+      cloudSource: source.source, viewSource: store, turns, replay, openResources, call,
+    }),
+  }, CloudChat))), 'cloud: main conversation')
+  ctx.effect(() => ctx.slots.inject('conversation.composer.bar', () => override(() => ctx.slots.register({
+    name: 'conversation.composer.bar', priority: -1, locale: 'dsh.cloud',
+    inject: () => ({
+      hooks: { cloud: source.source },
+      open: () => { if (source.source.getSnapshot().mode === 'cloud') goToChat(); else open() },
+    }),
+  }, CloudComposer))), 'cloud: local composer admission')
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: TAB_ID, kind: TAB_KIND, priority: 'builtin', keepMounted: true,
     title: () => t('title'),

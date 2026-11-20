@@ -1,53 +1,52 @@
-import type { CloudSessionEventKind, CloudSessionTimelineItem } from './session-events.ts'
-import { projectCloudSessionEvents, type CloudSessionEvent } from './session-events.ts'
-import css from './CloudPanel.module.css'
-import { en } from './locales.ts'
+import { memo, useMemo } from 'react'
+import { IconGlobeOutlineRegular, MarkdownDelegateProvider, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { CloudSessionTimelineItem } from './session-events.ts'
+import css from './CloudChat.module.css'
+import type {} from './locales.ts'
 
-export interface CloudSessionTimelineProps {
-  readonly label: string
-  readonly events: readonly CloudSessionEvent[]
-  readonly states?: Record<'running' | 'succeeded' | 'failed' | 'interrupted', string>
-  readonly detailsLabel?: string
-  readonly labels?: Partial<Record<CloudSessionEventKind, string>>
+interface TimelineProps extends PropsLocale<'dsh.cloud'> {
+  readonly items: readonly CloudSessionTimelineItem[]
 }
 
-const defaultLabels: Record<CloudSessionEventKind, string> = {
-  user: en.userMessage,
-  assistant: en.assistantMessage,
-  tool: en.toolMessage,
-  status: en.statusMessage,
-  error: en.errorMessage,
-  unknown: en.unknownMessage,
-}
-
-function itemClass(item: CloudSessionTimelineItem): string {
-  const suffix = `${item.kind.slice(0, 1).toUpperCase()}${item.kind.slice(1)}`
-  return `${css.message} ${css[`message${suffix}`] ?? ''}`
-}
-
-/** Render cloud events as text-only chat semantics; this never creates links or markup from event data. */
-export function CloudSessionTimeline({ label, events, labels, states, detailsLabel }: CloudSessionTimelineProps) {
-  const names = { ...defaultLabels, ...labels }
-  const statusNames = states ?? {
-    running: en.eventRunning,
-    succeeded: en.eventSucceeded,
-    failed: en.eventFailed,
-    interrupted: en.eventInterrupted,
+/** Cloud replies use native Markdown, with no local file resolver or automatic remote image downloads. */
+export const CloudSessionTimeline = memo(function CloudSessionTimeline({ t, items }: TimelineProps) {
+  const markdownLabels = useMemo(() => ({
+    code: { copyLabel: t('chatCopy'), copiedLabel: t('chatCopied') },
+    footnotes: t('chatFootnotes'),
+  }), [t])
+  const states = {
+    running: t('eventRunning'), succeeded: t('eventSucceeded'), failed: t('eventFailed'), interrupted: t('eventInterrupted'),
   }
-  return <ol aria-label={label} className={css.timeline}>
-    {projectCloudSessionEvents(events).map(item => <li key={item.id} className={itemClass(item)} data-event-kind={item.kind}>
-      <article>
-        <header>
-          <span>{names[item.kind]}</span>
-          <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleTimeString()}</time>
-        </header>
-        {item.state && <span role="status">{statusNames[item.state]}</span>}
-        <p>{item.text}</p>
-        {item.detail && <details>
-          <summary>{detailsLabel ?? en.eventDetails}</summary>
-          <pre className={css.output}>{item.detail}</pre>
-        </details>}
-      </article>
-    </li>)}
-  </ol>
-}
+  return <MarkdownDelegateProvider allowRemoteImages={false}>
+    <ol aria-label={t('events')} className={css.timeline}>
+      {items.map(item => <li key={item.id} className={css[item.kind]} data-event-kind={item.kind}>
+        {item.kind === 'tool'
+          ? <details className={css.toolCard}>
+            <summary>
+              <span className={css.toolName}>{t('toolMessage')}{item.text && <> · {item.text}</>}</span>
+              {item.state && <span className={css.toolState} data-state={item.state}>{states[item.state]}</span>}
+            </summary>
+            <pre>{item.detail || t('chatNoToolDetails')}</pre>
+          </details>
+          : item.kind === 'error'
+            ? <div className={css.turnError}>{t('chatTurnError')}</div>
+            : <article>
+              <header className={css.messageHeader}>
+                {item.kind === 'assistant' && <span className={css.assistantIcon}><IconGlobeOutlineRegular size={14} /></span>}
+                <span>{t(item.kind === 'user' ? 'userMessage' : 'assistantMessage')}</span>
+                {Number.isFinite(Date.parse(item.createdAt)) && <time dateTime={item.createdAt}>
+                  {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </time>}
+              </header>
+              {item.kind === 'user'
+                ? <p className={css.bubble}>{item.text}</p>
+                : <div className={css.reply}>
+                  <MarkdownText text={item.text} labels={markdownLabels} streaming={item.state === 'running'} />
+                  {(item.state === 'failed' || item.state === 'interrupted') && <small>{states[item.state]}</small>}
+                </div>}
+            </article>}
+      </li>)}
+    </ol>
+  </MarkdownDelegateProvider>
+})

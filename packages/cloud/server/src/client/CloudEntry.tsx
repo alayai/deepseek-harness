@@ -28,6 +28,15 @@ export function CloudEntry({ t, useCloud, open, wide }: PropsRuntime<'sidebar.fo
   </Tooltip>
 }
 
+/** Replace the local message actions while the Host owns a cloud connection. */
+export function CloudComposer({ t, useCloud, open }: PropsLocale<'dsh.cloud'> & InjectFace<CloudEntryInjected>) {
+  const mode = useCloud(value => value.mode)
+  return <div className={css.group}>
+    <span role="status" className={css.notice}>{t(mode === 'cloud' ? 'composerCloud' : mode === 'local' ? 'checkingMode' : mode)}</span>
+    <Button variant="outline" onClick={open}>{t(mode === 'cloud' ? 'openCloudConversation' : 'connection')}</Button>
+  </div>
+}
+
 /**
  * Draw the cloud page's navigation glyph; the sidebar owns its accessible label.
  * @param props - requested icon edge.

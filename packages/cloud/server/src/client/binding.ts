@@ -7,6 +7,10 @@ const Binding = z.object({
   cloudSessionId: z.uuid().brand<'CloudSessionId'>(), runtimeId: z.uuid().brand<'CloudRuntimeId'>(),
   credentialRef: z.uuid().brand<'CloudCredentialId'>(), desktopId: z.uuid().brand<'CloudDesktopId'>().nullable(),
   bindingRevision: z.number().int().positive(), state: z.enum(['active', 'disabled']),
+  pendingOperation: z.object({
+    id: z.uuid(), runtimeId: z.uuid(), bindingRevision: z.number().int().positive(),
+    state: z.enum(['queued', 'running', 'unknown']),
+  }).optional(),
 })
 
 /** Safe binding metadata; model keys and desktop control keys are never included. */
@@ -24,5 +28,7 @@ export function readBinding(
   const binding = Binding.parse(value)
   if (binding.serverId !== expected.serverId || binding.tenantId !== expected.tenantId
     || binding.workspaceId !== expected.workspaceId || binding.cloudSessionId !== expected.sessionId) throw new Error('BINDING_IDENTITY_MISMATCH')
+  if (binding.pendingOperation && (binding.pendingOperation.runtimeId !== binding.runtimeId
+    || binding.pendingOperation.bindingRevision > binding.bindingRevision)) throw new Error('BINDING_OPERATION_MISMATCH')
   return binding
 }

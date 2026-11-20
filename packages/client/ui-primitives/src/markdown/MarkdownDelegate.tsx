@@ -18,6 +18,8 @@ export type MarkdownMenuTarget =
 
 /** Navigation capabilities supplied by the nearest Markdown owner. */
 export interface MarkdownDelegate {
+  /** False renders authored remote images as alt text without a browser request. */
+  readonly allowRemoteImages?: boolean | undefined
   /** Open an object menu without executing its normal activation. */
   readonly getTriggerProps?: ((target: MarkdownMenuTarget) => Pick<HTMLAttributes<HTMLElement>, 'onContextMenu' | 'onKeyDown' | 'tabIndex'>) | undefined
   /**
@@ -59,9 +61,10 @@ export function MarkdownDelegateProvider({
   openFile,
   fileImages,
   getTriggerProps,
+  allowRemoteImages,
 }: MarkdownDelegateProviderProps): ReactNode {
-  const delegate = useMemo(() => ({ openExternalLink, openFile, fileImages, getTriggerProps }),
-    [openExternalLink, openFile, fileImages, getTriggerProps])
+  const delegate = useMemo(() => ({ openExternalLink, openFile, fileImages, getTriggerProps, allowRemoteImages }),
+    [openExternalLink, openFile, fileImages, getTriggerProps, allowRemoteImages])
   return (
     <MarkdownDelegateContext.Provider value={delegate}>
       {children}

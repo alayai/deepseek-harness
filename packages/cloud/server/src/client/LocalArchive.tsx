@@ -88,7 +88,7 @@ export function LocalArchive({ t, epoch, read, previewBot, exportBot, openCloud,
     <div className={css.group}>
       <Button variant="outline" disabled={busy || exporting !== null} onClick={load({ kind: 'sessions', epoch, offset: 0 })}>{t('localSessions')}</Button>
       <Button variant="outline" disabled={busy || exporting !== null} onClick={load({ kind: 'bots', epoch, offset: 0 })}>{t('localBots')}</Button>
-      <Button variant="outline" disabled={!cloudAvailable} onClick={openCloud}>{t('openCloudConversation')}</Button>
+      <Button variant="outline" disabled={!cloudAvailable} onClick={openCloud}>{t('chatChooseConversation')}</Button>
     </div>
     <p role="status" className={failed || exportFailed ? css.error : css.notice}>{exportFailed ? t('exportFailed') : failed ? t('localReadFailed') : busy ? t('waiting') : t('readOnly')}</p>
     {preview !== null && <section className={css.notice} aria-label={t('exportPreview')}>

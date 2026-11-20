@@ -9,6 +9,8 @@ export interface CloudSource {
 
 /** The owner of a read-only cloud state source and its polling lifetime. */
 export interface CloudSourceOwner {
+  /** Whether the Host has reported its mode at least once. */
+  readonly observed: boolean
   readonly source: CloudSource
   publish(next: CloudSnapshot): void
   refresh(): Promise<void>
@@ -22,10 +24,12 @@ export interface CloudSourceOwner {
 export function createCloudSource(read: () => Promise<CloudSnapshot>): CloudSourceOwner {
   let snapshot: CloudSnapshot = { mode: 'local', epoch: 0, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null }
   const listeners = new Set<() => void>()
+  let observed = false
   let closed = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const publish = (next: CloudSnapshot): void => {
-    if (closed || next.epoch < snapshot.epoch || JSON.stringify(next) === JSON.stringify(snapshot)) return
+    if (closed || next.epoch < snapshot.epoch || (observed && JSON.stringify(next) === JSON.stringify(snapshot))) return
+    observed = true
     snapshot = next
     for (const listener of listeners) listener()
   }
@@ -41,6 +45,7 @@ export function createCloudSource(read: () => Promise<CloudSnapshot>): CloudSour
   }
   void poll()
   return {
+    get observed() { return observed },
     source: {
       getSnapshot: () => snapshot,
       subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },

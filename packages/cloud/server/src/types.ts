@@ -1,6 +1,12 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
+import type {} from '@deepseek-ai/dsh-typert-protocol'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap { 'cloud/blocked': { readonly reason: string } }
+}
+
 /** Display-safe cloud state. Credentials never cross the Host boundary. */
 export interface CloudSnapshot {
   readonly mode: 'local' | 'authenticating' | 'cloud' | 'cloud-suspended'

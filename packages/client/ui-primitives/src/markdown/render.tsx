@@ -108,10 +108,11 @@ function vocabularyImageUrl(url: string): string | undefined {
  * @param url - The authored markdown destination.
  * @param pathImages - Rewriting vocabulary, when the render pass has one.
  * @param load - The mounted image's load number for rewritten URLs.
+ * @param allowRemote - Whether to load authored remote URLs.
  * @returns The displayable image URL, or undefined.
  */
-function imageSource(url: string, pathImages: MarkdownPathImages | undefined, load: number): string | undefined {
-  const remote = remoteImageUrl(sanitizeUrl(normalizeUri(url)))
+function imageSource(url: string, pathImages: MarkdownPathImages | undefined, load: number, allowRemote: boolean): string | undefined {
+  const remote = allowRemote ? remoteImageUrl(sanitizeUrl(normalizeUri(url))) : undefined
   if (remote !== undefined) return remote
   const rewritten = pathImages?.resolve(url)
   const allowed = rewritten === undefined ? undefined : vocabularyImageUrl(rewritten)
@@ -682,11 +683,13 @@ function MarkdownImage({ destination, alt, pathImages, streaming, inLink }: {
   streaming: boolean
   inLink: boolean
 }): ReactNode {
-  const { fileImages } = useMarkdownDelegate()
+  const { fileImages, allowRemoteImages } = useMarkdownDelegate()
   const [load] = useState(nextImageLoad)
   const file = streaming ? undefined : parseFileLink(destination)
   const resolved = file === undefined ? undefined : fileImages?.resolve(file.path)
-  const src = resolved === undefined ? imageSource(destination, pathImages, load) : freshImageUrl(resolved, load)
+  const src = resolved === undefined
+    ? imageSource(destination, pathImages, load, allowRemoteImages !== false)
+    : freshImageUrl(resolved, load)
   if (src === undefined) return <span className={css.imageAlt}>{alt}</span>
   return <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
 }

@@ -26,7 +26,7 @@ it('loads only explicit local reads and renders saved HTML as text', async () =>
   expect(view.container.querySelector('img')).toBeNull()
   expect(read).toHaveBeenLastCalledWith({ kind: 'messages', epoch: 2, sessionId: 'local-a', before: null })
   expect(screen.getByRole('region', { name: zh.localMessages }).textContent).toMatchSnapshot()
-  fireEvent.click(screen.getByRole('button', { name: zh.openCloudConversation }))
+  fireEvent.click(screen.getByRole('button', { name: zh.chatChooseConversation }))
   expect(openCloud).toHaveBeenCalledOnce()
 })
 
@@ -34,7 +34,7 @@ it('offers read-only Bot previews during cloud pause and distinguishes an absent
   const read = vi.fn(async (): Promise<LocalReadResult> => ({ kind: 'bots', available: false, ready: false, items: [], nextOffset: null }))
   render(<LocalArchive t={t} epoch={3} read={read} cloudAvailable={false} openCloud={vi.fn()} />)
   fireEvent.click(screen.getByText(zh.localArchive))
-  expect(screen.getByRole('button', { name: zh.openCloudConversation }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: zh.chatChooseConversation }).hasAttribute('disabled')).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: zh.localBots }))
   await screen.findByText(zh.botProviderMissing)
   expect(read).toHaveBeenCalledWith({ kind: 'bots', epoch: 3, offset: 0 })

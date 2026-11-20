@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendCloudSessionEvents, parseCloudSessionEvent, projectCloudSessionEvent } from '../src/client/session-events.ts'
+import { appendCloudSessionEvents, parseCloudSessionEvent, projectCloudSessionEvents } from '../src/client/session-events.ts'
 
 const row = (id: string, event: import('../src/types.ts').CloudValue) => ({ id, operationId: 'op-1', createdAt: '2026-11-18T00:00:00.000Z', event })
 
@@ -11,20 +11,20 @@ describe('cloud session event projection', () => {
     expect(appendCloudSessionEvents([first!], [first!, second!])).toHaveLength(2)
   })
 
-  it('unwraps native notification events and displays tool status as text', () => {
-    const event = parseCloudSessionEvent(row('3', { type: 'notification', params: { event: { type: 'tool/call', data: { name: 'read_file' } } } }))!
-    expect(projectCloudSessionEvent(event)).toMatchObject({ kind: 'tool', rawType: 'tool/call', text: 'Tool call: read_file' })
-  })
-
-  it('does not interpret markup in unknown events', () => {
-    const event = parseCloudSessionEvent(row('4', { type: 'future/event', data: { text: '<script>alert(1)</script>' } }))!
-    const projected = projectCloudSessionEvent(event)
-    expect(projected.kind).toBe('unknown')
-    expect(projected.text).toContain('<script>')
+  it('renders native human input once and excludes bookkeeping, plugin input and unknown events', () => {
+    const message = { id: 'user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'read the report' }] }
+    const items = [
+      native('1', 'initialized', {}),
+      native('2', 'agent/inbox/spliced', { inserted: [message, { ...message, source: { kind: 'plugin' } }] }),
+      native('3', 'session.status', { state: 'running' }),
+      native('4', 'turn/start', {}),
+      native('5', 'user/message', { message }),
+      native('6', 'future/event', { text: '<script>alert(1)</script>' }),
+    ]
+    expect(projectCloudSessionEvents(items)).toMatchObject([{ id: '2:0', kind: 'user', text: 'read the report' }])
   })
 })
 
-import { projectCloudSessionEvents } from '../src/client/session-events.ts'
 import { CloudSessionReplay } from '../src/client/session-replay.ts'
 const native = (id: string, type: string, data: import('../src/types.ts').CloudValue) => parseCloudSessionEvent(row(id, { type: 'notification', params: { event: { type, data } } }))!
 describe('stream and replay recovery', () => {
@@ -34,7 +34,7 @@ describe('stream and replay recovery', () => {
     expect(projectCloudSessionEvents([...events, native('3', 'assistant/message', { message: { content: [{ type: 'text', text: 'Hello world!' }] } })])).toMatchObject([{ id: '1', text: 'Hello world!', state: 'succeeded' }])
   })
   it('pairs tools by operation and call ID, preserving failure and text blocks', () => {
-    const events = [native('1', 'tool/call', { callId: 'c1', name: 'read', arguments: '{"path":"a"}' }), native('2', 'tool/result', { message: { callId: 'c1', isError: true, content: [{ type: 'text', text: 'denied' }] } })]
+    const events = [native('1', 'tool/call', { callId: 'c1', name: 'read', arguments: '{"path":"a"}' }), native('2', 'tool/result', { message: { role: 'user', source: { kind: 'tool', callId: 'c1' }, content: [{ type: 'tool-result', toolCallId: 'c1', isError: true, content: [{ type: 'text', text: 'denied' }] }] } })]
     expect(projectCloudSessionEvents(events)).toMatchObject([{ text: 'read', detail: 'denied', state: 'failed' }])
     expect(projectCloudSessionEvents([...events, { ...native('3', 'tool/call', { callId: 'c1', name: 'other' }), operationId: 'op-2' }])).toHaveLength(2)
   })

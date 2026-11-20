@@ -11,14 +11,12 @@ import { readBinding, type CloudBinding } from './binding.ts'
 import { LocalArchive } from './LocalArchive.tsx'
 import { canonicalBotDefinition, definitionDigest, findBotExportAttempt, findBotSyncRecord, reserveBotExportAttempt, rejectBotExportAttempt, sameBotSyncScope, saveBotSyncRecord, type BotExportPreview, type BotSyncRecord, type BotSyncScope } from './bot-sync.ts'
 import { CloudArtifacts, CloudArtifactReceipts } from './CloudArtifacts.tsx'
-import { CloudSessionReplay } from './session-replay.ts'
-import { CloudSessionTimeline } from './CloudSessionTimeline.tsx'
 import css from './CloudPanel.module.css'
 import type {} from './locales.ts'
 
 export interface CloudPanelInjected {
   artifacts?: CloudArtifactReceipts
-  replay?: CloudSessionReplay
+  openChat(): void
   hooks: { cloud: CloudSource; activities: CloudActivities['source']; view: CloudViewStore }
   viewActions: CloudViewStore['actions']
   remember: CloudActivities['remember']
@@ -57,7 +55,7 @@ function modelTemplates(value: CloudValue): ModelTemplate[] {
 
 /** Native client view using only Host RPC and explicitly selected RustFS transfers. */
 export function CloudPanel({
-  t, artifacts: sharedArtifacts, replay: sharedReplay, useCloud, useActivities, useView, viewActions: actions,
+  t, artifacts: sharedArtifacts, openChat, useCloud, useActivities, useView, viewActions: actions,
   login, logout, call, readLocal, exportLocal, remember, accepted,
 }: CloudPanelProps) {
   const snapshot = useCloud(value => value)
@@ -75,31 +73,31 @@ export function CloudPanel({
   const [credentials, setCredentials] = useState<Row[]>([])
   const [templates, setTemplates] = useState<ModelTemplate[]>([]), [template, setTemplate] = useState('')
   const [sessions, setSessions] = useState<Row[]>([])
+  const [bots, setBots] = useState<(Row & { revision: number })[]>([]), [botId, setBotId] = useState('')
+  const [supportsBots, setSupportsBots] = useState(false)
+  const bot = bots.find(item => item.id === botId)
   const [desktops, setDesktops] = useState<Row[]>([])
   const [objects, setObjects] = useState<Row[]>([]), [file, setFile] = useState<File | undefined>()
   const [name, setName] = useState(''), [slug, setSlug] = useState('')
   const [endpoint, setEndpoint] = useState('https://api.deepseek.com'), [model, setModel] = useState(''), [apiKey, setApiKey] = useState('')
-  const [command, setCommand] = useState(''), [prompt, setPrompt] = useState(''), [path, setPath] = useState('.')
+  const [command, setCommand] = useState(''), [path, setPath] = useState('.')
   const [content, setContent] = useState(''), [url, setUrl] = useState('about:blank'), [desktopText, setDesktopText] = useState('')
-  const [result, setResult] = useState<CloudValue>(null), [_eventVersion, setEventVersion] = useState(0), [image, setImage] = useState('')
+  const [result, setResult] = useState<CloudValue>(null), [image, setImage] = useState('')
   const [bindingState, setBinding] = useState<{ scope: string; epoch: number; binding: CloudBinding } | null>(null)
   const generation = useRef(0), transfer = useRef<AbortController | undefined>(undefined)
-  const localReplay = useRef(new CloudSessionReplay()), localArtifacts = useRef(new CloudArtifactReceipts())
+  const localArtifacts = useRef(new CloudArtifactReceipts())
   const active = useRef({ epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl })
   active.current = { epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl }
   const base = `/tenants/${tenant}/workspaces/${workspace}`, runtimePath = `${base}/runtimes/${runtime}`
-  const replay = sharedReplay ?? localReplay.current
-  const eventScope = `${snapshot.serverUrl}:${snapshot.epoch}:${base}/sessions/${session}`
-  const events = replay.read(eventScope).events
   const activity = useActivities(value => value[base])
   const operation = activity?.operation
   const binding = bindingState?.scope === `${base}/sessions/${session}` && bindingState.epoch === snapshot.epoch ? bindingState.binding : null
   const usable = snapshot.mode === 'cloud' && !busy
 
-  useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage(''); setEventVersion(value => value + 1) }, [snapshot.epoch, tenant, workspace])
+  useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage('') }, [snapshot.epoch, tenant, workspace])
   useEffect(() => { setResult(null); setTenants([]); setWorkspaces([]) }, [snapshot.epoch])
   useEffect(() => { setResult(null) }, [tenant, workspace])
-  useEffect(() => { setRuntimes([]); setSessions([]); setCredentials([]); setTemplates([]); setTemplate(''); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
+  useEffect(() => { setRuntimes([]); setSessions([]); setBots([]); setBotId(''); setSupportsBots(false); setCredentials([]); setTemplates([]); setTemplate(''); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
   useEffect(() => () => { generation.current++; active.current = { ...active.current, mode: 'local' }; transfer.current?.abort() }, [])
 
   const request = (target: string, method: CloudRequest['method'] = 'GET', body: CloudValue = null, key: string | null = null) =>
@@ -193,31 +191,31 @@ export function CloudPanel({
     const value = await request(`${base}/sessions/${sessionId}/binding`)
     const parsed = readBinding(value, { serverId: text(info.serverId), tenantId: tenant, workspaceId: workspace, sessionId })
     if (current()) setBinding({ scope: `${base}/sessions/${sessionId}`, epoch: snapshot.epoch, binding: parsed })
-    if (current()) await loadSessionEvents(sessionId, current)
-  }
-  const readSessionPage = async (sessionId: string, current: () => boolean): Promise<number> => {
-    const scope = `${snapshot.serverUrl}:${snapshot.epoch}:${base}/sessions/${sessionId}`
-    const before = replay.read(scope).after
-    const page = await request(`${base}/sessions/${sessionId}/events?after=${before}`)
-    if (!current() || active.current.session !== sessionId) return 0
-    replay.accept(scope, before, page)
-    setEventVersion(value => value + 1)
-    return Array.isArray(record(page).items) ? (record(page).items as CloudValue[]).length : 0
-  }
-  const loadSessionEvents = async (sessionId: string, current: () => boolean) => {
-    for (let count = 0; count < 20 && current(); count++) if (await readSessionPage(sessionId, current) < 100) return
   }
   const refresh = async (current: () => boolean, includeBinding = true) => {
-    const values = await Promise.all(['/runtimes', '/model-credentials', '/sessions', '/desktops', '/objects'].map(suffix => request(base + suffix)))
-    // Older dsh-server versions do not expose presets yet; credentials and
-    // resources must remain usable when that optional read returns 404.
-    const presetValue = await request(base + '/model-templates').catch(() => null)
+    const [runtimes, credentials, sessions, desktops, objects] = await Promise.all(
+      ['/runtimes', '/model-credentials', '/sessions', '/desktops', '/objects'].map(suffix => request(base + suffix)),
+    )
+    const [presetValue, info] = await Promise.all([request(base + '/model-templates').catch(() => null), request('/server-info')])
     if (!current()) return
-    setRuntimes(rows(values[0] ?? null)); setCredentials(rows(values[1] ?? null)); setSessions(rows(values[2] ?? null))
-    setTemplates(modelTemplates(presetValue)); setDesktops(rows(values[3] ?? null)); setObjects(rows(values[4] ?? null))
-    if (session && includeBinding) await loadBinding(session, current)
+    setRuntimes(rows(runtimes ?? null)); setCredentials(rows(credentials ?? null)); setSessions(rows(sessions ?? null))
+    setTemplates(modelTemplates(presetValue)); setDesktops(rows(desktops ?? null)); setObjects(rows(objects ?? null))
+    const supportsBots = record(record(info).capabilities ?? null).workspaceBots === true
+    setSupportsBots(supportsBots)
+    if (supportsBots) await refreshBots(current)
+    if (session && includeBinding && current()) await loadBinding(session, current)
   }
-  const queued = async (target: string, body: CloudValue, current: () => boolean, sessionId?: string) => {
+  const refreshBots = async (current: () => boolean) => {
+    const result = record(await request(base + '/bots?limit=100')).items
+    if (!current()) return
+    if (!Array.isArray(result)) throw Error('INVALID_WORKSPACE_BOTS')
+    setBots(result.flatMap((value) => {
+      const item = record(value), id = text(item.id), revision = item.latestRevision
+      return item.state === 'active' && id && typeof revision === 'number' && Number.isSafeInteger(revision) && revision > 0
+        ? [{ id, name: `${text(item.name) || id} · ${t('bindingRevision')} ${revision}`, runtimeId: '', revision }] : []
+    }))
+  }
+  const queued = async (target: string, body: CloudValue, current: () => boolean) => {
     const key = randomUUID()
     // Keep the key visible even if the first write response is lost. Never replay automatically.
     remember({ scope: base, path: target, key })
@@ -228,21 +226,13 @@ export function CloudPanel({
     accepted(base, key, { path: pollBase, id })
     if (!current()) return
     setResult(receipt)
-    const readEvents = () => sessionId === undefined ? Promise.resolve(0) : readSessionPage(sessionId, current)
     for (let count = 0; count < 660 && current(); count++) {
-      if (sessionId !== undefined) await readEvents()
       const settled = record(await request(`${pollBase}/operations/${id}`))
       if (!current()) return
       setResult(settled)
       const output = record(settled.result ?? null)
       if (output.mimeType === 'image/png' && typeof output.data === 'string') setImage(`data:image/png;base64,${output.data}`)
-      if (!['queued', 'running'].includes(text(settled.state))) {
-        if (sessionId !== undefined) {
-          // Drain committed terminal events before ending the replay.
-          while (current() && await readEvents() === 100) { /* The next cursor belongs to readEvents. */ }
-        }
-        return
-      }
+      if (!['queued', 'running'].includes(text(settled.state))) return
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
   }
@@ -333,11 +323,25 @@ export function CloudPanel({
               {button(t('saveCredential'), async (current) => { const secret = apiKey; setApiKey(''); const data = await request(base + '/model-credentials', 'POST', { endpoint, model, apiKey: secret }); if (current()) { setResult(data); await refresh(current) } }, !!apiKey && !!model)}</div>
           </>)}
           {renderSection('agent', t('session'), <>
-            <div className={css.group}>{select(t('credential'), credential, setCredential, credentials)}{select(t('sessionDesktop'), desktop, setDesktop, desktops.filter(item => item.runtimeId === runtime))}{select(t('session'), session, (value) => { setSession(value); setBinding(null); setEventVersion(value => value + 1) }, sessions)}
-              {button(t('createSession'), async (current) => { const data = await request(base + '/sessions', 'POST', { runtimeId: runtime, credentialId: credential, ...(desktop ? { desktopId: desktop } : {}), title: name || t('session') }, randomUUID()); if (current()) { const id = text(record(data).id); setEventVersion(value => value + 1); setSession(id); setBinding(null); setResult(data); await refresh(current, false); if (current()) await loadBinding(id, current) } }, !!runtime && !!credential && (!desktop || desktops.some(item => item.id === desktop && item.runtimeId === runtime)))}</div>
-            <label className={css.field}>{t('prompt')}<textarea value={prompt} onChange={(event) =>{  setPrompt(event.target.value) }} disabled={!usable} maxLength={16000} /></label>
-            {button(t('send'), current => queued(`${base}/sessions/${session}/prompts`, { prompt, timeoutSeconds: 180, expectedBindingRevision: binding?.bindingRevision ?? 0 }, current, session), binding !== null && binding.state === 'active' && !!session && !!prompt)}
-            <CloudSessionTimeline states={{ running: t('eventRunning'), succeeded: t('eventSucceeded'), failed: t('eventFailed'), interrupted: t('eventInterrupted') }} detailsLabel={t('eventDetails')} label={t('events')} events={events} labels={{ user: t('userMessage'), assistant: t('assistantMessage'), tool: t('toolMessage'), status: t('statusMessage'), error: t('errorMessage'), unknown: t('unknownMessage') }} />
+            <div className={css.group}>{select(t('credential'), credential, setCredential, credentials)}
+              {select(t('sessionDesktop'), desktop, setDesktop, desktops.filter(item => item.runtimeId === runtime))}
+              {supportsBots && select(t('chatBotOptional'), botId, setBotId, bots)}
+              {select(t('session'), session, (value) => { setSession(value); setBinding(null) }, sessions)}
+              {button(t('createSession'), async (current) => {
+                const data = await request(base + '/sessions', 'POST', {
+                  runtimeId: runtime, credentialId: credential, ...(desktop ? { desktopId: desktop } : {}),
+                  ...(bot ? { bot: { id: bot.id, revision: bot.revision } } : {}), title: name || t('session'),
+                }, randomUUID())
+                if (current()) {
+                  const id = text(record(data).id)
+                  setSession(id); setBinding(null); setResult(data)
+                  await refresh(current, false)
+                  if (current()) await loadBinding(id, current)
+                }
+              }, !!runtime && !!credential && (!botId || bot !== undefined)
+                && (!desktop || desktops.some(item => item.id === desktop && item.runtimeId === runtime)))}
+              <Button variant="outline" disabled={!usable || !session} onClick={openChat}>{t('openCloudConversation')}</Button>
+            </div>
           </>)}
           {renderSection('overview', t('command'), <div className={css.group}>{field(t('command'), command, setCommand)}{button(t('execute'), current => queued(runtimePath + '/commands', { command, timeoutSeconds: 30 }, current), !!runtime && !!command)}</div>)}
           {renderSection('files', t('files'), <>

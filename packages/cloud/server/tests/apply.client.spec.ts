@@ -1,4 +1,11 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { fireEvent, render } from '@testing-library/react'
+import { CloudChat } from '../src/client/CloudChat.tsx'
+import { CloudComposer } from '../src/client/CloudEntry.tsx'
+import { zh } from '../src/client/locales.ts'
+import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { Context } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots'
@@ -21,9 +28,10 @@ describe('cloud UI composition and disposal', () => {
     const ctx = new Context(), entries: Entry[] = [], definitions: SidebarRightTabDefinition[] = []
     const dictionaries = new Set<string>(), mounted = createSnapshotStore<SessionId | undefined>(undefined)
     const openTab = vi.fn(), selectPanel = vi.fn()
-    const state = vi.fn(async (): Promise<{ ok: true; value: CloudSnapshot }> => ({
-      ok: true, value: { mode: 'local', epoch: 0, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null },
-    }))
+    const first = Promise.withResolvers<{ ok: true; value: CloudSnapshot }>()
+    let snapshot: CloudSnapshot = { mode: 'local', epoch: 0, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null }
+    const state = vi.fn(async (): Promise<{ ok: true; value: CloudSnapshot }> => ({ ok: true, value: snapshot }))
+      .mockReturnValueOnce(first.promise)
     ctx.provide('remote', { dshCloud: { state } } as never)
     ctx.provide('remote.dshCloud', {} as never)
     ctx.provide('connection', { reconnect: vi.fn() } as never)
@@ -38,18 +46,29 @@ describe('cloud UI composition and disposal', () => {
       register: (namespace: string) => { dictionaries.add(namespace); return () => { dictionaries.delete(namespace) } },
     } as never)
     // Exercise the core's runtime scope checks with the same erased registration used by the renderer.
-    const core = new SlotCore() as { register(options: object, component: () => null): () => void }
+    const ledger = new SlotCore()
+    const core = ledger as { register(options: object, component: () => null): () => void }
     core.register({ name: 'root', children: {
       'sidebar.footer.action': { kind: 'list', scope: 'root' },
+      'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
+      'main.conversation': { kind: 'single', scope: 'session-maybe' },
       main: { kind: 'keyed', scope: 'root' },
       'sidebar.panellist': { kind: 'list', scope: 'root' },
       'sidebar.right.pane.tab': { kind: 'keyed', scope: 'session' },
       'sidebar.right.pane.tab.title': { kind: 'keyed', scope: 'session' },
     } }, () => null)
+    const localComposer = () => null
+    const bar = 'conversation.composer.bar'
+    core.register({ name: bar }, localComposer)
+    const mainSlot = 'main.conversation'
+    const localConversation = () => null
+    core.register({ name: mainSlot }, localConversation)
+    const mainWinner = () => ledger.entriesOfSlot(mainSlot)[0]?.component
+    const winner = () => ledger.entriesOfSlot(bar)[0]?.component
     ctx.provide('slots', {
       inject: (_name: string, register: Parameters<SlotRegistry['inject']>[1]) => ctx.effect(register),
-      register: (entry: Entry) => {
-        const dispose = core.register(entry, () => null)
+      register: (entry: Entry, component: () => null) => {
+        const dispose = core.register(entry, component)
         entries.push(entry)
         return () => { dispose(); entries.splice(entries.indexOf(entry), 1) }
       },
@@ -57,7 +76,12 @@ describe('cloud UI composition and disposal', () => {
     try {
       const fiber = ctx.plugin({ inject, apply })
       await fiber.await()
-      await vi.waitFor(() => { expect(entries).toHaveLength(5) })
+      expect(winner()).toBe(CloudComposer)
+      expect(mainWinner()).toBe(CloudChat)
+      first.resolve({ ok: true, value: snapshot })
+      await vi.waitFor(() => { expect(winner()).toBe(localComposer) })
+      expect(mainWinner()).toBe(localConversation)
+      expect(entries).toHaveLength(5)
       const open = entries.find(entry => entry.name === 'sidebar.footer.action')?.inject?.().open
       expect(open).toBeTypeOf('function')
       open?.()
@@ -73,6 +97,24 @@ describe('cloud UI composition and disposal', () => {
       expect(main?.hooks?.view).toBe(tab?.hooks?.view)
       main?.viewActions?.workspace('selected-workspace')
       expect(tab?.hooks?.view.getSnapshot().workspace).toBe('selected-workspace')
+      for (const mode of ['authenticating', 'cloud', 'cloud-suspended', 'local'] as const) {
+        snapshot = { ...snapshot, mode, epoch: snapshot.epoch + 1 }
+        await vi.waitFor(() => { expect(main?.hooks?.cloud.getSnapshot().mode).toBe(mode) }, { timeout: 2500 })
+        expect(winner()).toBe(mode === 'local' ? localComposer : CloudComposer)
+        expect(mainWinner()).toBe(mode === 'local' ? localConversation : CloudChat)
+        if (mode === 'cloud') {
+          const go = entries.find(entry => entry.name === bar)?.inject?.().open
+          if (go === undefined) throw new Error('Missing cloud conversation action')
+          const ui = render(createElement(CloudComposer, { t: makeTranslate(zh), open: go, useCloud: select => select(snapshot) }))
+          try {
+            expect(ui.queryByRole('textbox')).toBeNull()
+            expect(ui.queryByRole('button', { name: '发送' })).toBeNull()
+            fireEvent.click(ui.getByRole('button', { name: '前往云端会话' }))
+            expect(selectPanel).toHaveBeenLastCalledWith(null)
+            expect(openTab).toHaveBeenCalledTimes(1)
+          } finally { ui.unmount() }
+        }
+      }
       await fiber.dispose()
       expect(entries).toEqual([])
       expect(definitions).toEqual([])

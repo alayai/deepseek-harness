@@ -1,7 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`cloud workspace UI > drains terminal event pages and replaces replayed history on the next prompt 1`] = `"会话绑定资源绑定已启用 · 版本 7云端会话10000000-0000-4000-8000-000000000004云端沙箱10000000-0000-4000-8000-000000000003模型凭据10000000-0000-4000-8000-000000000005私有桌面未绑定桌面仅浏览其他沙箱；发送消息仍使用会话绑定沙箱、凭据和可选桌面已经固定，更换资源请新建会话刷新会话绑定停用绑定并取消会话任务浏览会话资源"`;
-
 exports[`cloud workspace UI > keeps execution paused without covering the application in authenticating 1`] = `"等待云端登录"`;
 
 exports[`cloud workspace UI > keeps execution paused without covering the application in cloud-suspended 1`] = `"本地操作保持暂停，请重新登录或明确退出云端"`;
