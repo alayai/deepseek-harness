@@ -91,6 +91,7 @@ describe('cloud workspace UI', () => {
       if (request.path.endsWith('/events?after=0')) return { items: firstPage, nextAfter: '100' }
       if (request.path.endsWith('/events?after=100')) return { items: firstPage.map((_, i) => ({ id: String(i + 101), operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'assistant/message', data: { text: `event-${i + 100}` } } })), nextAfter: '200' }
       if (request.path.endsWith('/events?after=200')) return { items: [{ id: '201', operationId: '10000000-0000-4000-8000-000000000007', createdAt: '2026-11-18T00:00:00.000Z', event: { type: 'turn/end', data: { reason: { kind: 'completed' } } } }], nextAfter: '201' }
+      if (request.path.endsWith('/events?after=201')) return { items: [], nextAfter: '201' }
       return []
     })
     render(<CloudPanel {...input} />)

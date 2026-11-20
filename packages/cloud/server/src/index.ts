@@ -21,6 +21,28 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap { 'cloud/blocked': { readonly reason: string } }
 }
 
+/** Local display, directory management, and read-only navigation remain available without enabling local execution. */
+function allowsLocalManagement(namespace: string, method: string): boolean {
+  return (namespace === 'pluginInventory' && method === 'list')
+    || (namespace === 'pluginManager' && (method === 'listBundles' || method === 'listPlugins'))
+    || (namespace === 'directoryPicker' && (method === 'pick' || method === 'list'))
+    || (namespace === 'workspace' && method === 'create')
+    || (namespace === 'workspace' && method === 'follow')
+    // Creating an empty local session is a UI bookkeeping operation. It is
+    // needed after adding a directory, while prompts and tools remain blocked
+    // by the cloud admission guard below.
+    || (namespace === 'session' && method === 'create')
+    || (namespace === 'session' && ['control', 'follow', 'list', 'page', 'projections'].includes(method))
+    // Model settings need to read the local provider directory while the Host
+    // is connected to dsh-server. These calls only describe mounted providers
+    // and their configuration. Settings and credential responses are already
+    // redacted; all mutation methods remain blocked.
+    || (namespace === 'llm' && (method === 'listProviders' || method === 'listConfigurableProviders'))
+    || (namespace === 'settings' && method === 'describe')
+    || (namespace === 'credentials' && method === 'describe')
+    || (namespace === 'session' && method === 'modelCatalog')
+}
+
 /** Own cloud authority separately from DeepSeek platform accounts and local Session controllers. */
 export class DshCloudService extends TypertRemoteService {
   static inject = ['agents', 'tools', 'jobs', 'typertGateway']
@@ -35,6 +57,11 @@ export class DshCloudService extends TypertRemoteService {
     ctx.on('connection/request', async (request, response, next) => {
       const path = new URL(request.url ?? '/', 'http://host').pathname
       if (/^\/api\/dshCloud\/(?:state|beginLogin|request|logout|readLocal|exportLocal)$/.test(path)) {  await next(); return }
+      // Remote read streams are multiplexed through this endpoint; the
+      // Gateway guard below still checks the concrete namespace/method.
+      if (path === '/api/remote.mux') { await next(); return }
+      const remote = /^\/api\/([^/]+)\/([^/]+)$/.exec(path)
+      if (remote?.[1] !== undefined && remote[2] !== undefined && allowsLocalManagement(remote[1], remote[2])) { await next(); return }
       if (this.cloud.snapshot().mode !== 'local') {
         response.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
         response.end(JSON.stringify({ error: { code: 'CLOUD_LOCAL_TARGET_BLOCKED' } }))
@@ -46,7 +73,7 @@ export class DshCloudService extends TypertRemoteService {
       finally { this.localHttp.delete(entry); finished.resolve() }
     })
     ctx.typertGateway.guard((request) => {
-      if (request.namespace !== 'dshCloud' && this.cloud.snapshot().mode !== 'local') {
+      if (request.namespace !== 'dshCloud' && !allowsLocalManagement(request.namespace, request.method) && this.cloud.snapshot().mode !== 'local') {
         throw new RemoteError('cloud/blocked', 'Local operations are paused while using dsh-server', { reason: 'LOCAL_TARGET_BLOCKED' })
       }
     })

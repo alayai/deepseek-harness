@@ -1,4 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
+import { IncomingMessage, ServerResponse } from 'node:http'
+import { Socket } from 'node:net'
 import { Peer } from '@deepseek-ai/dsh-client-connection'
 import type { Principal, RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
 import { describe, expect, it, vi } from 'vitest'
@@ -23,16 +25,69 @@ function caller(ctx: Context, principal: Principal) {
   return ctx.extend({ invocation }).dshCloud
 }
 async function fixture() {
-  const ctx = new Context(), guard = vi.fn(), toolGuard = vi.fn()
+  const ctx = new Context(), guard = vi.fn(), toolGuard = vi.fn(), drain = vi.fn(async () => {})
   ctx.provide('agents', { list: () => [] } as never)
   ctx.provide('jobs', { list: () => [] } as never)
   ctx.provide('tools', { guard: toolGuard } as never)
-  ctx.provide('typertGateway', { guard, drain: async () => {} } as never)
+  ctx.provide('typertGateway', { guard, drain } as never)
   await ctx.plugin(DshCloudService)
-  return { ctx, owner: caller(ctx, { kind: 'owner' }), guard, toolGuard }
+  return { ctx, owner: caller(ctx, { kind: 'owner' }), guard, toolGuard, drain }
 }
 
 describe('local read admission in cloud mode', () => {
+  it.each(['authenticating', 'cloud', 'cloud-suspended'] as const)('allows plugin display and directory selection over HTTP and RPC while %s', async (mode) => {
+    const { ctx, owner, guard, toolGuard, drain } = await fixture()
+    try {
+      if (mode === 'cloud-suspended') drain.mockRejectedValueOnce(new Error('local drain failed'))
+      owner.beginLogin('http://localhost:17800')
+      if (mode !== 'authenticating') await vi.waitFor(() => { expect(owner.state().mode).toBe(mode) })
+      else expect(owner.state().mode).toBe(mode)
+      const gateway = guard.mock.calls[0]?.[0] as (r: { namespace: string; method: string }) => void
+      const allowed = [
+        ['pluginInventory', 'list'], ['pluginManager', 'listBundles'], ['pluginManager', 'listPlugins'],
+        ['directoryPicker', 'pick'], ['directoryPicker', 'list'], ['workspace', 'create'], ['workspace', 'follow'], ['dshCloud', 'state'],
+        ['llm', 'listProviders'], ['llm', 'listConfigurableProviders'], ['session', 'create'],
+        ['session', 'control'], ['session', 'follow'], ['session', 'list'], ['session', 'page'], ['session', 'projections'],
+        ['settings', 'describe'], ['credentials', 'describe'], ['session', 'modelCatalog'],
+      ] as const
+      const blocked = [
+        ['pluginManager', 'installBundle'], ['pluginManager', 'removeBundle'], ['pluginManager', 'updateBundle'],
+        ['pluginManager', 'setBundleEnabled'], ['pluginManager', 'setPluginEnabled'],
+        ['directoryPicker', 'createDirectory'], ['workspace', 'rename'], ['session', 'prompt'],
+        ['credentials', 'set'], ['credentials', 'unset'], ['settings', 'mutate'], ['llm', 'discoverModels'],
+      ] as const
+      for (const [namespace, method] of allowed) expect(() => { gateway({ namespace, method }) }).not.toThrow()
+      for (const [namespace, method] of blocked) {
+        expect(() => { gateway({ namespace, method }) }).toThrow(expect.objectContaining({ details: { reason: 'LOCAL_TARGET_BLOCKED' } }))
+      }
+      for (const [path, admitted] of [
+        ...allowed.map(parts => [`/api/${parts.join('/')}`, true] as const),
+        ...blocked.map(parts => [`/api/${parts.join('/')}`, false] as const),
+        ['/api/pluginInventory/list/extra', false], ['/api/directoryPicker/pick/extra', false],
+        ['/api/remote.mux', true],
+        ['/api/pluginManager/listPlugins?refresh=1', true],
+      ] as const) {
+        const request = new IncomingMessage(new Socket())
+        request.url = path
+        const response = new ServerResponse(request)
+        const writeHead = vi.spyOn(response, 'writeHead').mockReturnValue(response)
+        const end = vi.spyOn(response, 'end').mockReturnValue(response)
+        const next = vi.fn(async () => {})
+        await ctx.waterfall('connection/request', request, response, next)
+        expect(next).toHaveBeenCalledTimes(admitted ? 1 : 0)
+        if (admitted) expect(writeHead).not.toHaveBeenCalled()
+        else {
+          expect(writeHead).toHaveBeenCalledWith(409, expect.any(Object))
+          expect(end).toHaveBeenCalledWith(JSON.stringify({ error: { code: 'CLOUD_LOCAL_TARGET_BLOCKED' } }))
+        }
+      }
+      const tool = toolGuard.mock.calls[0]?.[0] as () => string | undefined
+      expect(tool()).toBe('DSH_CLOUD_LOCAL_EXECUTION_BLOCKED')
+      const nextStep = vi.fn()
+      expect(await ctx.waterfall('agent/pre-step', {} as never, nextStep)).toEqual({ kind: 'reject' })
+      expect(nextStep).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose() }
+  })
   it('requires the Host owner and a cloud target; old epochs are rejected', async () => {
     const { ctx, owner } = await fixture()
     try {

@@ -31,6 +31,7 @@ export interface CloudPanelInjected {
 }
 export type CloudPanelProps = PropsLocale<'dsh.cloud'> & InjectFace<CloudPanelInjected>
 type Row = { id: string; name: string; runtimeId: string }
+type ModelTemplate = { id: string; provider: string; endpoint: string; model: string; protocol: string }
 function record(value: CloudValue): { [key: string]: CloudValue } { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {} }
 function text(value: CloudValue | undefined): string { return typeof value === 'string' ? value : '' }
 function rows(value: CloudValue): Row[] {
@@ -43,6 +44,15 @@ function rows(value: CloudValue): Row[] {
       runtimeId: text(row.runtimeId),
     }
   })
+}
+function modelTemplates(value: CloudValue): ModelTemplate[] {
+  return (Array.isArray(value) ? value : []).map((item) => {
+    const row = record(item)
+    return {
+      id: text(row.id), provider: text(row.provider), endpoint: text(row.endpoint),
+      model: text(row.model), protocol: text(row.protocol),
+    }
+  }).filter(item => item.id && item.endpoint && item.model)
 }
 
 /** Native client view using only Host RPC and explicitly selected RustFS transfers. */
@@ -63,6 +73,7 @@ export function CloudPanel({
   const [workspaces, setWorkspaces] = useState<Row[]>([])
   const [runtimes, setRuntimes] = useState<Row[]>([])
   const [credentials, setCredentials] = useState<Row[]>([])
+  const [templates, setTemplates] = useState<ModelTemplate[]>([]), [template, setTemplate] = useState('')
   const [sessions, setSessions] = useState<Row[]>([])
   const [desktops, setDesktops] = useState<Row[]>([])
   const [objects, setObjects] = useState<Row[]>([]), [file, setFile] = useState<File | undefined>()
@@ -88,7 +99,7 @@ export function CloudPanel({
   useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage(''); setEventVersion(value => value + 1) }, [snapshot.epoch, tenant, workspace])
   useEffect(() => { setResult(null); setTenants([]); setWorkspaces([]) }, [snapshot.epoch])
   useEffect(() => { setResult(null) }, [tenant, workspace])
-  useEffect(() => { setRuntimes([]); setSessions([]); setCredentials([]); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
+  useEffect(() => { setRuntimes([]); setSessions([]); setCredentials([]); setTemplates([]); setTemplate(''); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
   useEffect(() => () => { generation.current++; active.current = { ...active.current, mode: 'local' }; transfer.current?.abort() }, [])
 
   const request = (target: string, method: CloudRequest['method'] = 'GET', body: CloudValue = null, key: string | null = null) =>
@@ -198,9 +209,12 @@ export function CloudPanel({
   }
   const refresh = async (current: () => boolean, includeBinding = true) => {
     const values = await Promise.all(['/runtimes', '/model-credentials', '/sessions', '/desktops', '/objects'].map(suffix => request(base + suffix)))
+    // Older dsh-server versions do not expose presets yet; credentials and
+    // resources must remain usable when that optional read returns 404.
+    const presetValue = await request(base + '/model-templates').catch(() => null)
     if (!current()) return
     setRuntimes(rows(values[0] ?? null)); setCredentials(rows(values[1] ?? null)); setSessions(rows(values[2] ?? null))
-    setDesktops(rows(values[3] ?? null)); setObjects(rows(values[4] ?? null))
+    setTemplates(modelTemplates(presetValue)); setDesktops(rows(values[3] ?? null)); setObjects(rows(values[4] ?? null))
     if (session && includeBinding) await loadBinding(session, current)
   }
   const queued = async (target: string, body: CloudValue, current: () => boolean, sessionId?: string) => {
@@ -310,6 +324,11 @@ export function CloudPanel({
             {button(t('history'), async (current) => { const data = await request(runtimePath + '/operations'); if (current()) setResult(data) }, !!runtime)}
           </div>)}
           {renderSection('settings', t('credential'), <>
+            {templates.length > 0 && <div className={css.group}><label className={css.field}>{t('modelTemplate')}<select aria-label={t('modelTemplate')} value={template} onChange={(event) => { setTemplate(event.target.value) }} disabled={!usable}><option value="">{t('choose')}</option>{templates.map(item => <option key={item.id} value={item.id}>{item.provider} · {item.model}</option>)}</select></label>
+              <Button variant="outline" disabled={!usable || !template} onClick={() => {
+                const selected = templates.find(item => item.id === template)
+                if (selected) { setApiKey(''); setEndpoint(selected.endpoint); setModel(selected.model) }
+              }}>{t('useTemplate')}</Button></div>}
             <div className={css.group}>{field(t('endpoint'), endpoint, setEndpoint, 'url')}{field(t('model'), model, setModel)}{field(t('apiKey'), apiKey, setApiKey, 'password')}
               {button(t('saveCredential'), async (current) => { const secret = apiKey; setApiKey(''); const data = await request(base + '/model-credentials', 'POST', { endpoint, model, apiKey: secret }); if (current()) { setResult(data); await refresh(current) } }, !!apiKey && !!model)}</div>
           </>)}

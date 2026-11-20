@@ -293,7 +293,9 @@ function spawnWorker(boot: InspectorWorkerBoot<MessagePort>): Worker {
   const options: WorkerOptions = {
     workerData: boot,
     transferList: [boot.hostSourcePort],
-    execArgv: [],
+    // Node strips --expose-internals from inherited Worker flags. The profile-resolution bootstrap
+    // then loads Node internals; without this flag that load aborts the Host on Electron's Node.
+    execArgv: ['--expose-internals'],
   }
   if (!import.meta.url.endsWith('.ts')) {
     return new Worker(new URL('./worker.js', import.meta.url), options)
