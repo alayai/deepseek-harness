@@ -19,13 +19,16 @@ export function CloudArtifacts({ t, scope, result, receipts, enabled, call }: Pr
   result: CloudValue
   receipts: CloudArtifactReceipts
   enabled: boolean
-  call(path: string, method: 'GET' | 'POST', body: CloudValue, key: string | null): Promise<CloudValue>
+  call: (path: string, method: 'GET' | 'POST', body: CloudValue, key: string | null) => Promise<CloudValue>
 }) {
   const [filename, setFilename] = useState('report.txt'), [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [, update] = useState(0)
   const active = useRef(scope); active.current = scope
   useEffect(() => () => { active.current = '' }, [])
   const op = object(result), file = object(object(op.result ?? null).file ?? null)
-  const publishable = op.kind === 'files' && op.state === 'succeeded' && typeof file.content === 'string' && typeof op.id === 'string' && typeof op.runtimeId === 'string'
+  const { id, runtimeId } = op
+  const sourcePath = file.path
+  const publishable = op.kind === 'files' && op.state === 'succeeded' && typeof file.content === 'string'
+    && typeof id === 'string' && typeof runtimeId === 'string' && typeof sourcePath === 'string'
   const entries = receipts.attempts.filter(item => item.scope === scope)
   const pending = entries.find(item => !item.objectId)
   const run = async (attempt: Attempt) => {
@@ -42,10 +45,11 @@ export function CloudArtifacts({ t, scope, result, receipts, enabled, call }: Pr
     <h3>{t('artifactTitle')}</h3><p className={css.notice}>{t('artifactHint')}</p>
     {failed && <p role="alert">{t('artifactFailed')}</p>}
     {publishable && !pending && !entries.some(item => item.operationId === op.id && item.objectId) && <div className={css.group}>
+      <p className={css.notice}>{t('artifactFile')}: <bdi>{sourcePath}</bdi></p>
       <label className={css.field}>{t('artifactFilename')}<input value={filename} disabled={!enabled || busy} onChange={(event) => { setFilename(event.target.value) }} maxLength={255} /></label>
       <Button variant="outline" disabled={!enabled || busy || !filename || /[/\\\x00-\x1f\x7f]/.test(filename)} onClick={() => {
         if (receipts.attempts.length >= 50) { setFailed(true); return }
-        const attempt = { scope, operationId: String(op.id), runtimeId: String(op.runtimeId), filename, key: randomUUID() }
+        const attempt = { scope, operationId: id, runtimeId, filename, key: randomUUID() }
         receipts.attempts.push(attempt); void run(attempt)
       }}>{t('artifactPublish')}</Button>
     </div>}

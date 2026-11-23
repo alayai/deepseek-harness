@@ -18,6 +18,7 @@ import { CloudPanel, type CloudPanelInjected } from './CloudPanel.tsx'
 import { createCloudSource } from './source.ts'
 import { createCloudViewStore } from './view-store.ts'
 import { CloudArtifactReceipts } from './CloudArtifacts.tsx'
+import { CloudFileState } from './CloudFiles.tsx'
 import { CloudSessionReplay } from './session-replay.ts'
 import { createCloudActivities } from './activity.ts'
 import { CloudComposer, CloudEntry, CloudIcon, CloudTabTitle } from './CloudEntry.tsx'
@@ -42,6 +43,7 @@ function registerUi(ctx: Context): void {
   const activities = createCloudActivities()
   const replay = new CloudSessionReplay()
   const artifacts = new CloudArtifactReceipts()
+  const files = new CloudFileState()
   const turns = new CloudChatTurns()
   let popup: Window | null = null
   const source = createCloudSource(async () => {
@@ -49,7 +51,7 @@ function registerUi(ctx: Context): void {
     if (!result.ok) throw new Error(result.error.code)
     return result.value
   })
-  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear(); turns.clear() }, 'cloud: client lifetime')
+  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear(); files.clear(); turns.clear() }, 'cloud: client lifetime')
   let previous = source.source.getSnapshot()
   ctx.effect(() => source.source.subscribe(() => {
     const snapshot = source.source.getSnapshot(), mode = snapshot.mode
@@ -61,7 +63,7 @@ function registerUi(ctx: Context): void {
       store.actions.reset()
       activities.clear(); replay.clear(); artifacts.clear()
     }
-    if (mode === 'local') turns.clear()
+    if (mode === 'local') { turns.clear(); files.clear() }
     if (snapshot.serverUrl !== previous.serverUrl || snapshot.epoch !== previous.epoch) replay.clear()
     if (mode === 'local' && previous.mode !== 'local') connection.reconnect()
     previous = snapshot
@@ -76,7 +78,7 @@ function registerUi(ctx: Context): void {
   }
   const goToChat = () => { ctx.layout.selectPanel(null) }
   const injectPanel = (): CloudPanelInjected => ({
-    artifacts, openChat: goToChat,
+    artifacts, files, openChat: goToChat,
     hooks: { cloud: source.source, activities: activities.source, view: store },
     viewActions: store.actions,
     remember: activities.remember,
@@ -116,6 +118,11 @@ function registerUi(ctx: Context): void {
     store.actions.section('agent')
     open()
   }
+  const openFiles = (runtime: string): void => {
+    store.actions.resource('runtime', runtime)
+    store.actions.section('files')
+    open()
+  }
   const override = (register: () => () => void) => {
     let release: (() => void) | undefined
     const sync = () => {
@@ -134,7 +141,7 @@ function registerUi(ctx: Context): void {
     name: 'main.conversation', priority: -1, locale: 'dsh.cloud',
     inject: () => ({
       hooks: { cloud: source.source, view: store },
-      cloudSource: source.source, viewSource: store, turns, replay, openResources, call,
+      cloudSource: source.source, viewSource: store, turns, replay, openResources, openFiles, call,
     }),
   }, CloudChat))), 'cloud: main conversation')
   ctx.effect(() => ctx.slots.inject('conversation.composer.bar', () => override(() => ctx.slots.register({

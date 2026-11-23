@@ -1,5 +1,16 @@
 /** Cloud UI copy, separate from DeepSeek platform login. */
 export const en = {
+  fileSandbox: 'Sandbox files', fileLegacy: 'File tools', fileRoot: 'Sandbox root', fileParent: 'Parent folder',
+  fileRefresh: 'Refresh folder', fileEmpty: 'This folder is empty.', fileBack: 'Back to files', fileSave: 'Save file',
+  fileEditor: 'Cloud text editor', fileDiscard: 'Discard draft', fileReadError: 'Could not read the file or folder. Try again.',
+  fileUnsupported: 'Update dsh-server, Worker and the sandbox image to use this feature.',
+  fileConflict: 'The cloud file has changed. Copy your draft and reopen the file to review the latest version.',
+  filePending: 'Save result is unconfirmed. Check the original task before trying again.',
+  fileCheckSave: 'Check original save', fileSaved: 'Saved to the cloud sandbox.',
+  fileSaveError: 'Could not save the file. Your draft is still open.',
+  fileTextOnly: 'The editor supports UTF-8 text with consistent line endings.', fileTooLarge: 'Text files can be up to 16 KiB.',
+  fileStopped: 'The save was cancelled or timed out. Copy your draft, then reopen the file to check its contents.',
+  artifactFile: 'Source file', chatFiles: 'Session files',
   chatRefresh: 'Refresh conversation', chatLoading: 'Loading conversation…', chatEmptyTitle: 'Start a cloud conversation',
   chatPlaceholder: 'Message cloud DSH…', chatExecutionHint: 'This chat runs in the selected cloud workspace.',
   chatKeyboard: 'Enter to send · Shift+Enter for a new line', chatLatest: 'Latest messages', chatRunning: 'Cloud task in progress…',
@@ -69,6 +80,17 @@ export const en = {
 export type CloudKey = keyof typeof en
 /** Chinese cloud UI dictionary. */
 export const zh: Record<CloudKey, string> = {
+  fileSandbox: '沙箱文件', fileLegacy: '文件工具', fileRoot: '沙箱根目录', fileParent: '上级目录',
+  fileRefresh: '刷新目录', fileEmpty: '此目录为空', fileBack: '返回文件列表', fileSave: '保存文件',
+  fileEditor: '云端文本编辑器', fileDiscard: '丢弃草稿', fileReadError: '无法读取文件或目录，请重试',
+  fileUnsupported: '请更新 dsh-server、Worker 和沙箱镜像后使用此功能',
+  fileConflict: '云端文件已变更。请复制草稿，再重新打开文件查看最新版本',
+  filePending: '保存结果尚未确认，请先查询原任务',
+  fileCheckSave: '查询原保存任务', fileSaved: '已保存到云端沙箱',
+  fileSaveError: '无法保存文件，草稿仍保留在编辑器内',
+  fileTextOnly: '编辑器支持换行格式统一的 UTF-8 文本', fileTooLarge: '单个文本文件最多 16 KiB',
+  fileStopped: '保存已取消或超时。请复制草稿，再重新打开文件核对内容',
+  artifactFile: '源文件', chatFiles: '会话文件',
   chatRefresh: '刷新会话', chatLoading: '正在加载会话…', chatEmptyTitle: '开始云端对话',
   chatPlaceholder: '输入消息，与云端 DSH 对话…', chatExecutionHint: '对话在所选云端工作空间中运行',
   chatKeyboard: 'Enter 发送 · Shift+Enter 换行', chatLatest: '回到最新消息', chatRunning: '云端正在处理…',

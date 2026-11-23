@@ -42,7 +42,12 @@ const events = [
 let attempts = 0
 const publications: unknown[] = []
 const prompts: unknown[] = []
+let fileAction: 'listPage' | 'read' | 'replace' = 'listPage'
+let fileConflict = false
+const fileRevision = 'a'.repeat(64)
+const fileNextRevision = 'b'.repeat(64)
 const operationId = '00000000-0000-4000-8000-000000000020'
+const fileOperationId = '00000000-0000-4000-8000-000000000021'
 const input: Omit<CloudPanelProps, 'openChat'> = {
   artifacts, t: key => zh[key] ?? key,
   useView: bindSnapshotSelector(store), viewActions: store.actions,
@@ -68,8 +73,18 @@ const input: Omit<CloudPanelProps, 'openChat'> = {
     if (request.path.endsWith('/binding')) return { schemaVersion: 1, serverId, tenantId, workspaceId, cloudSessionId: request.path.includes(emptySessionId) ? emptySessionId : sessionId, runtimeId, credentialRef, desktopId: null, bindingRevision: 1, state: 'active' }
     if (request.path.includes(emptySessionId + '/events?after=')) return { items: [], nextAfter: '0' }
     if (request.path.includes('/events?after=')) { const after = BigInt(request.path.split('after=')[1]); return { items: events.filter(row => BigInt(row.id) > after), nextAfter: String(events.length) } }
-    if (request.path.endsWith('/files')) return { id: 'file-op', runtimeId, state: 'queued' }
-    if (request.path.includes('/operations/')) return { id: 'file-op', runtimeId, state: 'succeeded', kind: 'files', result: { file: { content: 'cmVwb3J0' } } }
+    if (request.path.endsWith('/files')) {
+      const body = request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body) ? request.body : {}
+      if (body.action === 'listPage' || body.action === 'read' || body.action === 'replace') fileAction = body.action
+      return { id: fileOperationId, runtimeId, state: 'queued', kind: 'files' }
+    }
+    if (request.path.includes('/operations/' + fileOperationId)) {
+      if (fileAction === 'listPage') return { id: fileOperationId, runtimeId, state: 'succeeded', kind: 'files', result: { file: { path: '.', entries: [{ name: 'notes.txt', type: 'file' }], nextAfter: null } } }
+      if (fileAction === 'read') return { id: fileOperationId, runtimeId, state: 'succeeded', kind: 'files', result: { file: { path: 'notes.txt', content: btoa('before'), revision: fileRevision } } }
+      return fileConflict
+        ? { id: fileOperationId, runtimeId, state: 'failed', kind: 'files', errorCode: 'FILE_REVISION_CONFLICT', result: null }
+        : { id: fileOperationId, runtimeId, state: 'succeeded', kind: 'files', result: { file: { path: 'notes.txt', revision: fileNextRevision } } }
+    }
     if (request.path.endsWith('/artifacts')) {
       publications.push({ key: request.idempotencyKey, body: request.body })
       if (++attempts === 1) throw Error('RESPONSE_LOST')
@@ -79,7 +94,7 @@ const input: Omit<CloudPanelProps, 'openChat'> = {
     return { items: [] }
   },
 }
-Object.assign(window, { cloudFixture: { publications, prompts } })
+Object.assign(window, { cloudFixture: { publications, prompts, setFileConflict: (value: boolean) => { fileConflict = value } } })
 function Fixture() {
   const [shown, show] = useState(true), [resources, setResources] = useState(false)
   return <>

@@ -24,6 +24,7 @@ export interface CloudChatInjected {
   replay: CloudSessionReplay
   turns: CloudChatTurns
   openResources(): void
+  openFiles?(runtime: string): void
   call: CloudPanelInjected['call']
 }
 
@@ -41,7 +42,7 @@ type Request = (path: string) => ReturnType<CloudChatInjected['call']>
 
 /** Route around the local Session provider while preserving the native main panel. */
 export function CloudChat({
-  t, useCloud, useView, cloudSource, viewSource, replay, turns, call, openResources,
+  t, useCloud, useView, cloudSource, viewSource, replay, turns, call, openResources, openFiles,
 }: CloudChatProps) {
   const snapshot = useCloud(value => value)
   const { tenant, workspace, session } = useView(value => value)
@@ -132,7 +133,8 @@ export function CloudChat({
     </div>}
     {active && data && selected && <Conversation key={cacheKey} t={t}
       scope={JSON.stringify([snapshot.serverUrl, data.serverId, data.userId, tenant, workspace, selected.id])}
-      cacheKey={cacheKey} revision={revision} base={base} path={path} epoch={snapshot.epoch} replay={replay} turns={turns}
+      openFiles={openFiles} cacheKey={cacheKey} revision={revision} base={base} path={path} epoch={snapshot.epoch}
+      replay={replay} turns={turns}
       current={() => current(session)} call={call} request={request} botRevision={selected.bot?.revision}
       loadBinding={async () => readBinding(await request(path + '/binding'), {
         serverId: data.serverId, tenantId: tenant, workspaceId: workspace, sessionId: selected.id,
@@ -156,6 +158,7 @@ function ChatEmpty({ title, description, action, onAction, alert = false }: {
 }
 
 interface ConversationProps extends PropsLocale<'dsh.cloud'> {
+  openFiles: ((runtime: string) => void) | undefined
   scope: string
   cacheKey: string
   revision: number
@@ -172,7 +175,7 @@ interface ConversationProps extends PropsLocale<'dsh.cloud'> {
 }
 
 function Conversation({
-  t, scope, cacheKey, revision, base, path, epoch, replay, turns, current: selected, call, request, botRevision, loadBinding,
+  t, scope, cacheKey, revision, base, path, epoch, replay, turns, current: selected, call, request, botRevision, loadBinding, openFiles,
 }: ConversationProps) {
   const mounted = useRef(false)
   useLayoutEffect(() => {
@@ -326,6 +329,8 @@ function Conversation({
           <div className={css.composerContext}>
             {busy ? <span role="status"><span aria-hidden="true" className={css.spinner} />{busyText}</span>
               : <span title={t('chatExecutionHint')}><IconGlobeOutlineRegular size={14} />{t('cloud')}</span>}
+            {binding && openFiles && <Button size="sm" variant="ghost"
+              onClick={() => { if (current()) openFiles(binding.runtimeId) }}>{t('chatFiles')}</Button>}
             {botRevision !== undefined && !busy && <span>{t('chatBot')} · v{botRevision}</span>}
           </div>
           {canCancel

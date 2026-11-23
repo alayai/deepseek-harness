@@ -11,11 +11,13 @@ import { readBinding, type CloudBinding } from './binding.ts'
 import { LocalArchive } from './LocalArchive.tsx'
 import { canonicalBotDefinition, definitionDigest, findBotExportAttempt, findBotSyncRecord, reserveBotExportAttempt, rejectBotExportAttempt, sameBotSyncScope, saveBotSyncRecord, type BotExportPreview, type BotSyncRecord, type BotSyncScope } from './bot-sync.ts'
 import { CloudArtifacts, CloudArtifactReceipts } from './CloudArtifacts.tsx'
+import { CloudFileState, AuthenticatedCloudFiles } from './CloudFiles.tsx'
 import css from './CloudPanel.module.css'
 import type {} from './locales.ts'
 
 export interface CloudPanelInjected {
   artifacts?: CloudArtifactReceipts
+  files?: CloudFileState
   openChat(): void
   hooks: { cloud: CloudSource; activities: CloudActivities['source']; view: CloudViewStore }
   viewActions: CloudViewStore['actions']
@@ -55,7 +57,7 @@ function modelTemplates(value: CloudValue): ModelTemplate[] {
 
 /** Native client view using only Host RPC and explicitly selected RustFS transfers. */
 export function CloudPanel({
-  t, artifacts: sharedArtifacts, openChat, useCloud, useActivities, useView, viewActions: actions,
+  t, artifacts: sharedArtifacts, files, openChat, useCloud, useActivities, useView, viewActions: actions,
   login, logout, call, readLocal, exportLocal, remember, accepted,
 }: CloudPanelProps) {
   const snapshot = useCloud(value => value)
@@ -82,6 +84,7 @@ export function CloudPanel({
   const [endpoint, setEndpoint] = useState('https://api.deepseek.com'), [model, setModel] = useState(''), [apiKey, setApiKey] = useState('')
   const [command, setCommand] = useState(''), [path, setPath] = useState('.')
   const [content, setContent] = useState(''), [url, setUrl] = useState('about:blank'), [desktopText, setDesktopText] = useState('')
+  const [fileRead, setFileRead] = useState<{ scope: string; value: CloudValue }>()
   const [result, setResult] = useState<CloudValue>(null), [image, setImage] = useState('')
   const [bindingState, setBinding] = useState<{ scope: string; epoch: number; binding: CloudBinding } | null>(null)
   const generation = useRef(0), transfer = useRef<AbortController | undefined>(undefined)
@@ -89,6 +92,10 @@ export function CloudPanel({
   const active = useRef({ epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl })
   active.current = { epoch: snapshot.epoch, tenant, workspace, session, mode: snapshot.mode, serverUrl: snapshot.serverUrl }
   const base = `/tenants/${tenant}/workspaces/${workspace}`, runtimePath = `${base}/runtimes/${runtime}`
+  const [localFiles] = useState(() => new CloudFileState())
+  const readSequence = useRef(0)
+  const fileIdentity = JSON.stringify([snapshot.serverUrl, runtimePath])
+  const fileScope = JSON.stringify([fileIdentity, snapshot.epoch])
   const activity = useActivities(value => value[base])
   const operation = activity?.operation
   const binding = bindingState?.scope === `${base}/sessions/${session}` && bindingState.epoch === snapshot.epoch ? bindingState.binding : null
@@ -96,7 +103,7 @@ export function CloudPanel({
 
   useEffect(() => { generation.current++; transfer.current?.abort(); setBusy(false); setFailed(false); setImage('') }, [snapshot.epoch, tenant, workspace])
   useEffect(() => { setResult(null); setTenants([]); setWorkspaces([]) }, [snapshot.epoch])
-  useEffect(() => { setResult(null) }, [tenant, workspace])
+  useEffect(() => { setResult(null); setFileRead(undefined) }, [fileScope])
   useEffect(() => { setRuntimes([]); setSessions([]); setBots([]); setBotId(''); setSupportsBots(false); setCredentials([]); setTemplates([]); setTemplate(''); setDesktops([]); setObjects([]); setApiKey(''); setFile(undefined) }, [snapshot.epoch, tenant, workspace])
   useEffect(() => () => { generation.current++; active.current = { ...active.current, mode: 'local' }; transfer.current?.abort() }, [])
 
@@ -215,7 +222,20 @@ export function CloudPanel({
         ? [{ id, name: `${text(item.name) || id} · ${t('bindingRevision')} ${revision}`, runtimeId: '', revision }] : []
     }))
   }
+  const beginRead = (expectedPath: string) => {
+    const sequence = ++readSequence.current
+    setFileRead(undefined)
+    return (value: CloudValue) => {
+      const op = record(value), file = record(record(op.result ?? null).file ?? null)
+      if (sequence === readSequence.current && op.runtimeId === runtime && file.path === expectedPath) {
+        setFileRead({ scope: fileScope, value })
+      }
+    }
+  }
   const queued = async (target: string, body: CloudValue, current: () => boolean) => {
+    const input = record(body)
+    const onRead = target === runtimePath + '/files' && input.action === 'read' && typeof input.path === 'string'
+      ? beginRead(input.path) : undefined
     const key = randomUUID()
     // Keep the key visible even if the first write response is lost. Never replay automatically.
     remember({ scope: base, path: target, key })
@@ -230,6 +250,7 @@ export function CloudPanel({
       const settled = record(await request(`${pollBase}/operations/${id}`))
       if (!current()) return
       setResult(settled)
+      if (settled.state === 'succeeded' && settled.id === id) onRead?.(settled)
       const output = record(settled.result ?? null)
       if (output.mimeType === 'image/png' && typeof output.data === 'string') setImage(`data:image/png;base64,${output.data}`)
       if (!['queued', 'running'].includes(text(settled.state))) return
@@ -344,12 +365,20 @@ export function CloudPanel({
             </div>
           </>)}
           {renderSection('overview', t('command'), <div className={css.group}>{field(t('command'), command, setCommand)}{button(t('execute'), current => queued(runtimePath + '/commands', { command, timeoutSeconds: 30 }, current), !!runtime && !!command)}</div>)}
-          {renderSection('files', t('files'), <>
-            <div className={css.group}>{field(t('path'), path, setPath)}{button(t('list'), current => queued(runtimePath + '/files', { action: 'list', path }, current), !!runtime)}{button(t('read'), current => queued(runtimePath + '/files', { action: 'read', path }, current), !!runtime)}</div>
-            <label className={css.field}>{t('content')}<textarea value={content} onChange={(event) =>{  setContent(event.target.value) }} disabled={!usable} /></label>
-            {button(t('write'), (current) => { const bytes = new TextEncoder().encode(content); if (bytes.length > 16384) throw new Error('FILE_TOO_LARGE'); return queued(runtimePath + '/files', { action: 'write', path, content: btoa(String.fromCharCode(...bytes)) }, current) }, !!runtime)}
-          </>)}
-          {section === 'files' && <CloudArtifacts key={`${snapshot.serverUrl}:${snapshot.epoch}:${base}`} t={t} scope={base} result={result} receipts={sharedArtifacts ?? localArtifacts.current} enabled={usable} call={request} />}
+          {workspace && runtime && locked && <section className={section === 'files' ? css.section : undefined} hidden={section !== 'files'}>
+            <h3>{t('fileSandbox')}</h3>
+            {section === 'files' && <AuthenticatedCloudFiles key={fileScope} runtime={runtime} runtimePath={runtimePath} epoch={snapshot.epoch} scope={fileIdentity}
+              state={files ?? localFiles} enabled={usable} t={t} call={call} beginRead={beginRead} />}
+            <details>
+              <summary>{t('fileLegacy')}</summary>
+              <div className={css.group}>{field(t('path'), path, setPath)}{button(t('list'), current => queued(runtimePath + '/files', { action: 'list', path }, current), !!runtime)}{button(t('read'), current => queued(runtimePath + '/files', { action: 'read', path }, current), !!runtime)}</div>
+              <label className={css.field}>{t('content')}<textarea value={content} onChange={(event) => { setContent(event.target.value) }} disabled={!usable} /></label>
+              {button(t('write'), (current) => { const bytes = new TextEncoder().encode(content); if (bytes.length > 16384) throw new Error('FILE_TOO_LARGE'); return queued(runtimePath + '/files', { action: 'write', path, content: btoa(String.fromCharCode(...bytes)) }, current) }, !!runtime)}
+            </details>
+          </section>}
+          {section === 'files' && <CloudArtifacts key={fileScope} t={t} scope={base}
+            result={fileRead?.scope === fileScope ? fileRead.value : null}
+            receipts={sharedArtifacts ?? localArtifacts.current} enabled={usable} call={request} />}
           {renderSection('files', t('storage'), <>
             <p className={css.notice}>{t('uploadHint')}</p>
             <div className={css.group}><label className={css.field}>{t('files')}<input type="file" disabled={!usable} onChange={(event) =>{  setFile(event.target.files?.[0]) }} /></label>

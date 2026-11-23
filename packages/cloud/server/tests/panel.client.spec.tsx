@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { CloudPanel, type CloudPanelProps } from '../src/client/CloudPanel.tsx'
+import { CloudFileState } from '../src/client/CloudFiles.tsx'
 import { zh } from '../src/client/locales.ts'
 import type { CloudSnapshot, CloudValue } from '../src/types.ts'
 import { createCloudViewStore } from '../src/client/view-store.ts'
@@ -22,6 +23,82 @@ function props(mode: CloudSnapshot['mode'] = 'local', epoch = 8): CloudPanelProp
 }
 
 describe('cloud workspace UI', () => {
+  it('publishes the file selected by the latest read and reconciles a lost save only for its account', async () => {
+    const input = props('cloud')
+    input.files = new CloudFileState()
+    const serverId = '10000000-0000-4000-8000-000000000010', runtime = '10000000-0000-4000-8000-000000000003'
+    const account = '10000000-0000-4000-8000-000000000001', otherAccount = '10000000-0000-4000-8000-000000000002'
+    let userId = account, originalKey: string | null = null
+    const requests: string[] = [], reads = new Map<string, CloudValue>()
+    function result(id: string, file: CloudValue) { return { id, runtimeId: runtime, kind: 'files', state: 'succeeded', result: { file } } }
+    const saveId = '10000000-0000-4000-8000-000000000099'
+    const saved = result(saveId, { path: 'a.txt', revision: 'b'.repeat(64) })
+    const legacyId = '10000000-0000-4000-8000-000000000012'
+    vi.mocked(input.call).mockImplementation(async (request) => {
+      if (request.path === '/me') return { id: userId }
+      if (request.path === '/server-info') return { serverId }
+      if (request.path.endsWith('/files')) {
+        const body = request.body
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw Error('unexpected file request')
+        if (body.action === 'replace') {
+          requests.push('replace')
+          originalKey = request.idempotencyKey
+          throw Error('response lost')
+        }
+        const id = body.path === 'b.txt' ? legacyId : body.action === 'listPage' ? serverId : account
+        reads.set(id, result(id, body.action === 'listPage'
+          ? { path: '.', entries: [{ name: 'a.txt', type: 'file' }], nextAfter: null }
+          : { path: body.path!, content: btoa('original'), revision: 'a'.repeat(64) }))
+        return { id, runtimeId: runtime, kind: 'files' }
+      }
+      if (request.path.includes('/file-receipts?')) {
+        expect(request.path.split('?key=')[1]).toBe(originalKey)
+        expect(request.epoch).toBe(11)
+        requests.push('lookup')
+        return saved
+      }
+      if (request.path.endsWith('/operations/' + saveId)) { requests.push('poll'); return saved }
+      if (request.path.includes('/operations/')) return reads.get(request.path.split('/').at(-1)!) ?? null
+      if (request.path.endsWith('/artifacts')) {
+        expect(request.body).toMatchObject({ operationId: legacyId })
+        requests.push('publish B')
+        return { id: 'object-b' }
+      }
+      throw Error('unexpected request')
+    })
+    input.viewActions.tenant('team'); input.viewActions.workspace('workspace')
+    input.viewActions.resource('runtime', runtime); input.viewActions.section('files')
+    const view = render(<CloudPanel {...input} />)
+    await screen.findByText(zh.fileRoot)
+    fireEvent.click((await screen.findAllByRole('button', { name: zh.list }))[0]!)
+    fireEvent.click(await screen.findByRole('button', { name: 'a.txt' }))
+    const editor = await screen.findByRole('textbox', { name: zh.fileEditor })
+    await screen.findByText('a.txt', { selector: 'bdi' })
+    fireEvent.click(screen.getByText(zh.fileLegacy))
+    fireEvent.change(screen.getByLabelText(zh.path), { target: { value: 'b.txt' } })
+    fireEvent.click(screen.getByRole('button', { name: zh.read }))
+    await screen.findByText('b.txt', { selector: 'bdi' })
+    await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.artifactPublish }).disabled).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: zh.artifactPublish }))
+    await screen.findByText(legacyId, { exact: false, selector: 'article p' })
+    fireEvent.change(editor, { target: { value: 'unsent draft' } })
+    fireEvent.click(screen.getByRole('button', { name: zh.fileSave }))
+    await screen.findByText(zh.filePending)
+    expect(originalKey).toBeTruthy()
+    view.rerender(<CloudPanel {...input} useCloud={props('cloud-suspended', 9).useCloud} />)
+    expect(screen.queryByLabelText(zh.fileEditor)).toBeNull()
+    userId = otherAccount
+    view.rerender(<CloudPanel {...input} useCloud={props('cloud', 10).useCloud} />)
+    await screen.findByText(zh.fileRoot)
+    expect(screen.queryByLabelText(zh.fileEditor)).toBeNull()
+    userId = account
+    view.rerender(<CloudPanel {...input} useCloud={props('cloud', 11).useCloud} />)
+    expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: zh.fileEditor })).value).toBe('unsent draft')
+    fireEvent.click(screen.getByRole('button', { name: zh.fileCheckSave }))
+    await screen.findByText(zh.fileSaved)
+    expect(requests).toEqual(['publish B', 'replace', 'lookup', 'poll'])
+  })
+
   it('renders session-free login without a modal or local execution controls', () => {
     render(<CloudPanel {...props()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
