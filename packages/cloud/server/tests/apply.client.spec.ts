@@ -49,6 +49,8 @@ describe('cloud UI composition and disposal', () => {
     const ledger = new SlotCore()
     const core = ledger as { register(options: object, component: () => null): () => void }
     core.register({ name: 'root', children: {
+      'settings.section': { kind: 'list', scope: 'root' },
+      'bot.sidebar.directory': { kind: 'single', scope: 'root' },
       'sidebar.footer.action': { kind: 'list', scope: 'root' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
       'main.conversation': { kind: 'single', scope: 'session-maybe' },
@@ -102,6 +104,8 @@ describe('cloud UI composition and disposal', () => {
         await vi.waitFor(() => { expect(main?.hooks?.cloud.getSnapshot().mode).toBe(mode) }, { timeout: 2500 })
         expect(winner()).toBe(mode === 'local' ? localComposer : CloudComposer)
         expect(mainWinner()).toBe(mode === 'local' ? localConversation : CloudChat)
+        expect(entries.some(entry => entry.id === 'dsh-cloud-models')).toBe(mode !== 'local')
+        expect(entries.some(entry => entry.name === 'bot.sidebar.directory')).toBe(mode !== 'local')
         if (mode === 'cloud') {
           const go = entries.find(entry => entry.name === bar)?.inject?.().open
           if (go === undefined) throw new Error('Missing cloud conversation action')

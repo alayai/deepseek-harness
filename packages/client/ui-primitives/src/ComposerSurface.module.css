@@ -1,0 +1,7 @@
+.surface {
+  box-sizing: border-box;
+  border-radius: var(--dsw-radius-panel);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-input-major);
+  box-shadow: var(--dsw-elevation-soft);
+}

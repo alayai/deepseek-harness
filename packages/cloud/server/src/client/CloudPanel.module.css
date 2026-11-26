@@ -23,12 +23,62 @@
 .output { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .image { display: block; max-width: 100%; height: auto; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; overflow-wrap: anywhere; }
+.uploadStatus { display: grid; grid-template-columns: minmax(0, auto) minmax(120px, 1fr) auto; gap: 8px 12px; align-items: center; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.uploadStatus progress { width: 100%; min-width: 0; accent-color: var(--dsw-alias-state-success-primary); }
+.uploadName { min-width: 0; overflow-wrap: anywhere; color: var(--dsw-alias-label-primary); }
 @media (pointer: coarse) {
   .field input, .field select, .field textarea { font-size: 16px; }
 }
 .binding { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: 13px; }
 .binding dt { color: var(--dsw-alias-label-secondary); }
 .binding dd { margin: 0; overflow-wrap: anywhere; }
+.botEditor { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 12px; background: var(--dsw-alias-bg-layer-2); }
+.botEditor summary { cursor: pointer; font-weight: 500; }
+.botRoster { display: grid; gap: 8px; margin-bottom: 12px; }
+.botRoster h4 { margin: 0; font-size: 14px; font-weight: 500; }
+.botRoster ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.botRoster button { display: flex; width: 100%; justify-content: space-between; gap: 8px; border: 0.5px solid transparent; border-radius: 8px; padding: 8px 10px; color: inherit; background: transparent; text-align: start; cursor: pointer; }
+.botRoster button:hover, .botRoster .botSelected { border-color: var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-layer-2); }
+.botRoster small { color: var(--dsw-alias-label-secondary); }
+
+@media (max-width: 480px) {
+  .body { padding: 12px; }
+  .uploadStatus { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; }
+  .uploadStatus progress { grid-column: 1 / -1; grid-row: 2; }
+  .uploadStatus span:last-child { text-align: right; white-space: nowrap; }
+  .group > button { flex: 1 1 140px; }
+}
 
 .artifact { display: grid; gap: 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; padding: 12px; min-width: 0; overflow-wrap: anywhere; }
 .artifact p { margin: 0; }
+.objectBrowser, .objectEdit {
+  display: grid;
+  gap: var(--dsh-space-2, 8px);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.objectRows {
+  display: grid;
+  gap: var(--dsh-space-2, 8px);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.objectRows li {
+  display: grid;
+  gap: var(--dsh-space-1, 4px);
+  min-width: 0;
+}
+
+.objectEdit input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.sidebarBots { display: flex; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; flex-direction: column; gap: 6px; padding: 8px 2px; }
+.sidebarBots p { font-size: 13px; overflow-wrap: anywhere; }
+.sidebarBot { display: flex; align-items: center; gap: 8px; padding: 6px; border: 0; border-radius: 8px; font: inherit; color: inherit; background: transparent; text-align: start; cursor: pointer; }
+.sidebarBot:hover, .sidebarBot[aria-pressed=true] { background: var(--dsw-alias-bg-layer-2); }
+.sidebarBot span { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--dsw-alias-bg-layer-2); }
+.sidebarBot strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

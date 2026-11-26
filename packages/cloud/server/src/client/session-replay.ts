@@ -4,6 +4,7 @@ import { appendCloudSessionEvents, parseCloudSessionEvent, type CloudSessionEven
 /** Events and cursor are committed together; dropping the cache always restarts replay at zero. */
 export interface SessionReplay {
   readonly events: readonly CloudSessionEvent[]
+  readonly trimmed?: boolean
   readonly after: string
 }
 const empty: SessionReplay = { events: [], after: '0' }
@@ -50,7 +51,8 @@ export class CloudSessionReplay {
       start += 1
     }
     if (start) events = events.slice(start)
-    const next = { events, after: last > BigInt(previous.after) ? page.nextAfter : previous.after }
+    const trimmed = previous.trimmed || previous.events.length + items.length > events.length
+    const next = { events, ...(trimmed ? { trimmed: true } : {}), after: last > BigInt(previous.after) ? page.nextAfter : previous.after }
     this.sessions.delete(scope); this.sessions.set(scope, next)
     while (this.sessions.size > 4) {
       const oldest = this.sessions.keys().next().value
@@ -59,6 +61,26 @@ export class CloudSessionReplay {
     }
     return next
   }
+  /** Recheck the last cached row on reopen/reconnect. IDs are global, not sequential per session. */
+  resume(scope: string, previous: SessionReplay, page: CloudValue): boolean {
+    if (this.read(scope) !== previous) return false
+    const anchor = previous.events.at(-1)
+    if (!anchor || !page || typeof page !== 'object' || Array.isArray(page) || !Array.isArray(page.items)
+      || typeof page.nextAfter !== 'string' || !cursor(page.nextAfter)) throw Error('INVALID_EVENT_PAGE')
+    const first = parseCloudSessionEvent(page.items[0] ?? null)
+    if (first && first.id === anchor.id && JSON.stringify(first) === JSON.stringify(anchor)) return true
+    // Only a valid replacement page is evidence that this session's old tail is gone.
+    let last = BigInt(anchor.id) - 1n
+    for (const raw of page.items) {
+      const item = parseCloudSessionEvent(raw)
+      if (!item || !cursor(item.id) || BigInt(item.id) <= last) throw Error('INVALID_EVENT_PAGE')
+      last = BigInt(item.id)
+    }
+    if (BigInt(page.nextAfter) !== last) throw Error('INVALID_EVENT_CURSOR')
+    this.sessions.delete(scope)
+    return false
+  }
+
   /** Forget cached text when authority is withdrawn. */
   clear(): void { this.sessions.clear() }
 }

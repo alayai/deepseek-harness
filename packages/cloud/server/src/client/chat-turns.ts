@@ -156,6 +156,7 @@ export class CloudChatTurns {
     if (!attempt || !receipt || settled(attempt)) return
     const cancelPending = attempt.cancelling || attempt.operation?.cancelRequested || attempt.cancelUnconfirmed
     if (cancel && (!isActive(attempt.operation?.state ?? receipt.state) || cancelPending)) return
+    const confirmingCancellation = !cancel && attempt.cancelUnconfirmed === true
     if (cancel) { attempt.cancelling = true; this.notify() }
     const path = `${base}/runtimes/${receipt.runtimeId}/operations/${receipt.id}`
     try {
@@ -164,6 +165,7 @@ export class CloudChatTurns {
       }))
       if (this.read(scope) !== attempt) return
       if (operation.id !== receipt.id || operation.runtimeId !== receipt.runtimeId) throw new Error('OPERATION_MISMATCH')
+      if (confirmingCancellation && (operation.cancelRequested || !isActive(operation.state))) delete attempt.cancelUnconfirmed
       const previous = attempt.operation
       // A GET already in flight when cancellation was requested cannot erase its result.
       if (!previous || (isActive(previous.state) && (operation.state !== 'queued' || previous.state === 'queued'))

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CloudPanel, type CloudPanelProps } from '../../src/client/CloudPanel.tsx'
 import { CloudChat } from '../../src/client/CloudChat.tsx'
-import { CloudChatTurns } from '../../src/client/chat-turns.ts'
+import { CloudChatTurns, CloudRequestFailure } from '../../src/client/chat-turns.ts'
 import { ICON_SYMBOLS } from '@deepseek-ai/dsh-client-ui-primitives'
 import '../../../../client/ui-theme/src/styles/design-platform.css'
 import '../../../../client/ui-theme/src/styles/base.css'
@@ -21,10 +21,13 @@ import { bindSnapshotSelector } from '../../../../client/ui-renderer/src/client/
 const ids = Array.from({ length: 6 }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`)
 const [serverId, tenantId, workspaceId, sessionId, runtimeId, credentialRef] = ids
 const emptySessionId = '00000000-0000-4000-8000-000000000007'
+const reportBot = '00000000-0000-4000-8000-000000000008'
 const store = createCloudViewStore(), activities = createCloudActivities()
 const source = createSnapshotStore<CloudSnapshot>({ mode: 'cloud', epoch: 1, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null })
 const replay = new CloudSessionReplay(), turns = new CloudChatTurns(), artifacts = new CloudArtifactReceipts()
+const uploadFixture = new URLSearchParams(location.search).has('uploads')
 store.actions.tenant(tenantId); store.actions.workspace(workspaceId); store.actions.resource('runtime', runtimeId); store.actions.resource('session', sessionId); store.actions.section('agent')
+if (uploadFixture) store.actions.section('files')
 const userMessage = { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '请读取云端报告，整理本周交付情况和下一步建议。' }] }
 const answer = '### 本周交付概览\n\n已在云端工作空间读取报告，整理出以下两项：\n\n- **已完成**：上传与检索链路已通过联调。\n- **待验证**：补齐跨工作空间的访问检查。\n\n下一步建议先复核访问权限，再发布本周归档。'
 const events = [
@@ -48,17 +51,37 @@ const fileRevision = 'a'.repeat(64)
 const fileNextRevision = 'b'.repeat(64)
 const operationId = '00000000-0000-4000-8000-000000000020'
 const fileOperationId = '00000000-0000-4000-8000-000000000021'
+const uploadObject = '00000000-0000-4000-8000-000000000022'
+const uploads: string[] = []
+const objectFolder = '00000000-0000-4000-8000-000000000023'
+const storageFile = '00000000-0000-4000-8000-000000000024'
+let storageDeleted = false, storageVersion = 1
+let uploadFilename: string | null = null, uploadCompletions = 0
+let releaseUploadCheck: (() => void) | undefined
 const input: Omit<CloudPanelProps, 'openChat'> = {
   artifacts, t: key => zh[key] ?? key,
   useView: bindSnapshotSelector(store), viewActions: store.actions,
-  useActivities: bindSnapshotSelector(activities.source), remember: activities.remember, accepted: activities.accepted,
+  useActivities: bindSnapshotSelector(activities.source), remember: activities.remember,
+  accepted: activities.accepted, rejected: activities.rejected,
   useCloud: bindSnapshotSelector(source),
   login: async () => {}, logout: async () => {}, readLocal: async () => ({ kind: 'sessions', items: [], nextOffset: null }),
   call: async (request) => {
     if (request.path === '/server-info') return { serverId, version: '0.4.2', compatibility: { protocol: 1, client: { min: 1, max: 1 }, requiredSchema: 9, worker: { state: 'legacy', version: '0.4.0', protocol: null, features: null } } }
     if (request.path === '/me') return { id: credentialRef }
+    if (request.path.endsWith('/access')) return { contentWrite: true }
+    if (request.path.endsWith('/folders')) return [{ id: objectFolder, name: '交付资料', parentId: null, version: 1 }]
+    if (request.path.includes('/folders?')) return []
+    if (request.path.includes('/objects?')) {
+      const query = new URLSearchParams(request.path.split('?')[1])
+      const items = (query.get('status') === 'deleted') === storageDeleted && !query.has('folderId')
+        ? [{ id: storageFile, filename: '本周交付记录与工作空间存储验收.txt', folderId: null, version: storageVersion }] : []
+      return { items, nextCursor: null }
+    }
+    if (request.method === 'DELETE' && request.path.endsWith('/objects/' + storageFile)) { storageDeleted = true; storageVersion++; return { id: storageFile } }
+    if (request.method === 'POST' && request.path.endsWith('/objects/' + storageFile + '/restore')) { storageDeleted = false; storageVersion++; return { id: storageFile } }
     if (request.path.endsWith('/workspaces/' + workspaceId)) return { id: workspaceId, name: '研发工作空间' }
-    if (request.path.endsWith('/sessions')) return [{ id: sessionId, title: '交付周报与行动项' }, { id: emptySessionId, title: '新建会话' }]
+    if (request.path.endsWith('/bots?limit=100')) return { items: [{ id: reportBot, name: '报告助手', state: 'active', latestRevision: 3 }] }
+    if (request.path.includes('/sessions?limit=')) return [{ id: sessionId, title: '交付周报与行动项', bot: { id: reportBot, revision: 2 } }, { id: emptySessionId, title: '新建会话' }]
     if (request.path.endsWith('/prompts')) {
       prompts.push(request.body)
       events.push({
@@ -90,13 +113,32 @@ const input: Omit<CloudPanelProps, 'openChat'> = {
       if (++attempts === 1) throw Error('RESPONSE_LOST')
       return { id: 'object1' }
     }
+    if (uploadFixture && request.path.endsWith('/uploads') && request.method === 'POST') {
+      uploads.push(request.path)
+      const body = request.body
+      uploadFilename = body && typeof body === 'object' && !Array.isArray(body) && typeof body.filename === 'string' ? body.filename : null
+      uploadCompletions = 0
+      if (uploadFilename?.startsWith('large-')) throw new CloudRequestFailure('STORAGE_SCAN_SIZE_LIMIT')
+      return { object: { id: uploadObject }, uploadUrl: new URL('/__dsh_upload_fixture', location.href).href }
+    }
+    if (uploadFixture && request.path.endsWith(`/uploads/${uploadObject}/complete`)) {
+      uploads.push(request.path)
+      if (uploadFilename?.startsWith('blocked-')) throw new CloudRequestFailure('OBJECT_SCAN_BLOCKED')
+      if (++uploadCompletions === 1) {
+        await new Promise<void>((resolve) => { releaseUploadCheck = resolve })
+        releaseUploadCheck = undefined
+        throw new CloudRequestFailure('STORAGE_SCAN_UNAVAILABLE')
+      }
+      return { id: uploadObject, status: 'available', scanStatus: 'clean' }
+    }
     if (request.path.endsWith('/download')) return { downloadUrl: 'data:invalid' }
     return { items: [] }
   },
 }
-Object.assign(window, { cloudFixture: { publications, prompts, setFileConflict: (value: boolean) => { fileConflict = value } } })
+Object.assign(window, { cloudFixture: { publications, prompts, uploads, releaseUploadCheck: () => releaseUploadCheck?.(),
+  setFileConflict: (value: boolean) => { fileConflict = value } } })
 function Fixture() {
-  const [shown, show] = useState(true), [resources, setResources] = useState(false)
+  const [shown, show] = useState(true), [resources, setResources] = useState(uploadFixture)
   return <>
     <div className="fixture-controls">
       <small>界面预览 · 模拟服务端</small>

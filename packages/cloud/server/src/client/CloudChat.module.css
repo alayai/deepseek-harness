@@ -31,6 +31,8 @@
 }
 .context { min-width: 0; gap: 10px; }
 .topActions { flex: none; }
+.botSelect { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.botSelect select { max-width: 180px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; padding: 5px 8px; color: inherit; background: var(--dsw-alias-bg-layer-1); font: inherit; }
 .contextIcon, .emptyIcon, .assistantIcon {
   display: grid;
   flex: none;
@@ -153,6 +155,15 @@
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 .dock { flex: none; padding-block: 0 12px; }
+.botInspection { margin-block: 0 4px; }
+.botPublication {
+  max-height: min(26vh, 240px); overflow: auto; overflow-wrap: anywhere;
+  padding: 8px 12px; background: var(--dsw-alias-bg-layer-2); border-radius: 8px; font-size: 13px;
+}
+.botPublication > div { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.botPublication dl, .botPublication p { margin: 4px 0; }
+.botPublication dt { color: var(--dsw-alias-label-secondary); }
+.botPublication dd { margin: 0 0 6px; white-space: pre-wrap; }
 .composer {
   border: 1px solid var(--dsw-alias-border-l4);
   border-radius: 16px;
@@ -161,6 +172,11 @@
   padding: 10px 12px 8px;
 }
 .composer:focus-within { border-color: var(--cloud-chat-accent); }
+.composer.nativeComposer {
+  background: var(--dsw-specific-input-major);
+  border-radius: var(--dsw-radius-panel);
+  box-shadow: var(--dsw-elevation-soft);
+}
 .composer textarea {
   display: block;
   box-sizing: border-box;
@@ -199,6 +215,14 @@
 .directoryFailure { margin: 8px var(--cloud-chat-gutter) 0; }
 .notice details { min-width: 0; }
 .notice summary { cursor: pointer; }
+@container (max-width: 720px) {
+  .topBar { flex-wrap: wrap; justify-content: flex-start; }
+  .context { flex: 1 1 100%; }
+  .topActions { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+  .botSelect { min-width: 0; }
+  .botSelect select { min-width: 0; max-width: min(42cqi, 180px); text-overflow: ellipsis; }
+  .sessionSelect select { max-width: 100%; }
+}
 @container (max-width: 460px) {
   .topBar { gap: 8px; }
   .context { gap: 8px; }

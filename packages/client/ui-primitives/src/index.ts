@@ -4,6 +4,7 @@
 
 export type { CodeToolbarLabels } from './CodeToolbar.tsx'
 export { UserMessageBubble } from './UserMessageBubble.tsx'
+export { ComposerSurface } from './ComposerSurface.tsx'
 export type { UserMessageBubbleProps } from './UserMessageBubble.tsx'
 export { StateDot } from './StateDot.tsx'
 export type { StateDotState } from './StateDot.tsx'

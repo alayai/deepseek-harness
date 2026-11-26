@@ -13,6 +13,9 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type { LocalBotExportResult } from '../types.ts'
 import { IconGlobeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CloudChat } from './CloudChat.tsx'
+import { CloudBotSidebar } from './CloudBotSidebar.tsx'
+import { RuntimeReceipts } from './runtime-receipts.ts'
+import { CloudModels } from './CloudModels.tsx'
 import { CloudChatTurns, CloudRequestFailure } from './chat-turns.ts'
 import { CloudPanel, type CloudPanelInjected } from './CloudPanel.tsx'
 import { createCloudSource } from './source.ts'
@@ -41,6 +44,7 @@ function registerUi(ctx: Context): void {
   const t = ctx.locale.bind('dsh.cloud')
   const store = createCloudViewStore()
   const activities = createCloudActivities()
+  const taskReceipts = new RuntimeReceipts()
   const replay = new CloudSessionReplay()
   const artifacts = new CloudArtifactReceipts()
   const files = new CloudFileState()
@@ -51,7 +55,7 @@ function registerUi(ctx: Context): void {
     if (!result.ok) throw new Error(result.error.code)
     return result.value
   })
-  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); replay.clear(); artifacts.clear(); files.clear(); turns.clear() }, 'cloud: client lifetime')
+  ctx.effect(() => () => { source.dispose(); popup?.close(); activities.clear(); taskReceipts.clear(); replay.clear(); artifacts.clear(); files.clear(); turns.clear() }, 'cloud: client lifetime')
   let previous = source.source.getSnapshot()
   ctx.effect(() => source.source.subscribe(() => {
     const snapshot = source.source.getSnapshot(), mode = snapshot.mode
@@ -63,8 +67,12 @@ function registerUi(ctx: Context): void {
       store.actions.reset()
       activities.clear(); replay.clear(); artifacts.clear()
     }
+    if (mode === 'local' || snapshot.serverUrl !== previous.serverUrl) taskReceipts.clear()
     if (mode === 'local') { turns.clear(); files.clear() }
-    if (snapshot.serverUrl !== previous.serverUrl || snapshot.epoch !== previous.epoch) replay.clear()
+    if (snapshot.serverUrl !== previous.serverUrl || snapshot.epoch !== previous.epoch) {
+      replay.clear(); activities.clear(); artifacts.clear()
+    }
+    if (snapshot.serverUrl !== previous.serverUrl) { store.actions.reset(); files.clear(); turns.clear() }
     if (mode === 'local' && previous.mode !== 'local') connection.reconnect()
     previous = snapshot
   }), 'cloud: resume local subscriptions')
@@ -78,11 +86,12 @@ function registerUi(ctx: Context): void {
   }
   const goToChat = () => { ctx.layout.selectPanel(null) }
   const injectPanel = (): CloudPanelInjected => ({
-    artifacts, files, openChat: goToChat,
+    artifacts, files, taskReceipts, openChat: goToChat,
     hooks: { cloud: source.source, activities: activities.source, view: store },
     viewActions: store.actions,
     remember: activities.remember,
     accepted: activities.accepted,
+    rejected: activities.rejected,
     login: async (server) => {
       popup?.close()
       popup = window.open('about:blank', '_blank')
@@ -137,8 +146,18 @@ function registerUi(ctx: Context): void {
     const unsubscribe = source.source.subscribe(sync)
     return () => { unsubscribe(); release?.() }
   }
+  ctx.effect(() => ctx.slots.inject('bot.sidebar.directory', () => override(() => ctx.slots.register({
+    name: 'bot.sidebar.directory', locale: 'dsh.cloud',
+    inject: () => ({ hooks: { cloud: source.source, view: store }, cloudSource: source.source, viewSource: store,
+      call, openChat: goToChat, openResources }),
+  }, CloudBotSidebar))), 'cloud: DS Bot workspace roster')
+  ctx.effect(() => ctx.slots.inject('settings.section', () => override(() => ctx.slots.register({
+    name: 'settings.section', id: 'dsh-cloud-models', locale: 'dsh.cloud', order: 11, label: () => t('workspaceModels'),
+    inject: () => ({ hooks: { cloud: source.source, view: store }, call, manage: () => { store.actions.section('settings'); open() } }),
+  }, CloudModels))), 'cloud: workspace model settings')
   ctx.effect(() => ctx.slots.inject('main.conversation', () => override(() => ctx.slots.register({
     name: 'main.conversation', priority: -1, locale: 'dsh.cloud',
+    children: { 'dsh.cloud.bot.header': { kind: 'single', scope: 'root' }, 'dsh.cloud.bot.message': { kind: 'single', scope: 'root' } },
     inject: () => ({
       hooks: { cloud: source.source, view: store },
       cloudSource: source.source, viewSource: store, turns, replay, openResources, openFiles, call,

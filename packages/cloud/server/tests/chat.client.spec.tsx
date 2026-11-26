@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { CloudRequest, CloudSnapshot, CloudValue } from '../src/types.ts'
 import { CloudChat } from '../src/client/CloudChat.tsx'
+import { CloudBotSidebar } from '../src/client/CloudBotSidebar.tsx'
 import { CloudChatTurns, CloudRequestFailure } from '../src/client/chat-turns.ts'
 import { CloudSessionReplay } from '../src/client/session-replay.ts'
 import { createCloudViewStore } from '../src/client/view-store.ts'
@@ -31,7 +33,8 @@ const binding = (session: string, state = 'active') => ({
 const event = (seq: number, type: string, data: CloudValue) => ({
   id: String(seq), operationId: id, event: { type, data }, createdAt: '2026-11-20T00:00:00.000Z',
 })
-function fixture(handle: (request: CloudRequest) => CloudValue | Promise<CloudValue>, initial = snapshot) {
+function fixture(handle: (request: CloudRequest) => CloudValue | Promise<CloudValue>, initial = snapshot,
+  sessions: CloudValue = [{ id: sessionId, title: 'First' }, { id: other, title: 'Second' }]) {
   const cloudSource = createSnapshotStore(initial), viewSource = createCloudViewStore()
   const initView = () => {
     viewSource.actions.tenant(tenantId)
@@ -43,7 +46,7 @@ function fixture(handle: (request: CloudRequest) => CloudValue | Promise<CloudVa
   const call = vi.fn(async (request: CloudRequest): Promise<CloudValue> => {
     if (request.path === '/server-info') return { serverId }
     if (request.path === '/me') return { id: userId }
-    if (request.path === base + '/sessions') return [{ id: sessionId, title: 'First' }, { id: other, title: 'Second' }]
+    if (request.path === base + '/sessions?limit=20' || request.path.startsWith(base + '/sessions?limit=20&botId=') && Array.isArray(sessions)) return sessions
     return handle(request)
   })
   const props = {
@@ -62,6 +65,186 @@ const draft = async (value: string) => {
 }
 
 describe('cloud main conversation', () => {
+  it('loads an older conversation on retry without changing the draft or submitting a turn', async () => {
+    let reads = 0
+    const f = fixture((req) => {
+      if (req.path.endsWith('/binding')) return binding(sessionId)
+      if (req.path === base + '/sessions?limit=20&cursor=older') {
+        if (++reads === 1) throw Error('offline')
+        return { items: [{ id: sessionId, title: 'First' }, { id: other, title: 'Older' }], nextCursor: null }
+      }
+      return { items: [], nextAfter: '0' }
+    }, snapshot, { items: [{ id: sessionId, title: 'First' }], nextCursor: 'older' })
+    f.mount(); await draft('keep my text')
+    const more = screen.getByRole('button', { name: zh.moreSessions })
+    fireEvent.click(more); await screen.findByText(zh.sessionPageFailed)
+    fireEvent.click(more); await screen.findByRole('option', { name: 'Older' })
+    expect(screen.getAllByRole('option', { name: 'First' })).toHaveLength(1)
+    expect(screen.queryByText(zh.moreSessions)).toBeNull()
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: zh.prompt }).value).toBe('keep my text')
+    expect(f.viewSource.getSnapshot().session).toBe(sessionId)
+    expect(f.posts()).toEqual([])
+  })
+  it('opens an older Bot session by querying its binding before offering to create a conversation', async () => {
+    const f = fixture((req) => {
+      if (req.path.endsWith('/bots?limit=100')) return [{ id, name: 'Writer', state: 'active', latestRevision: 2 }]
+      if (req.path === base + '/sessions/' + sessionId) return { id: sessionId }
+      if (req.path === base + '/sessions?limit=20&botId=' + id) return { items: [{ id: other, bot: { id, revision: 1 } }], nextCursor: null }
+      throw Error('unexpected lookup')
+    }, snapshot, { items: [{ id: sessionId }], nextCursor: 'older' })
+    const openChat = vi.fn()
+    render(<CloudBotSidebar {...f} wide openChat={openChat} didNavigate={vi.fn()} toggleSidebar={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer' }))
+    await waitFor(() => expect(openChat).toHaveBeenCalledOnce())
+    expect(f.viewSource.getSnapshot().session).toBe(other)
+    expect(f.openResources).not.toHaveBeenCalled()
+    expect(f.posts()).toEqual([])
+  })
+  it('opens the bound session from the DS Bot sidebar and prepares a new session only on explicit creation', async () => {
+    const second = '10000000-0000-4000-8000-000000000010'
+    const f = fixture((request) => {
+      if (request.path === base + '/sessions/' + sessionId) return { id: sessionId, bot: { id, revision: 1 } }
+      if (request.path === base + '/bots?limit=100') return { items: [{ id, name: 'Writer', state: 'active', latestRevision: 3 }], nextCursor: 'p2' }
+      if (request.path === base + '/bots?limit=100&cursor=p2') return { items: [{ id: second, name: 'Editor', state: 'active', latestRevision: 1 }], nextCursor: null }
+      throw Error('Unexpected request')
+    }, snapshot, [{ id: other, bot: { id, revision: 3 } }, { id: sessionId, bot: { id, revision: 1 } }])
+    const openChat = vi.fn()
+    render(<CloudBotSidebar {...f} wide openChat={openChat} didNavigate={vi.fn()} toggleSidebar={vi.fn()} />)
+    const writer = await screen.findByRole('button', { name: 'Writer' })
+    await waitFor(() => expect(writer.getAttribute('aria-pressed')).toBe('true'))
+    expect(f.viewSource.getSnapshot().botFilter).toBe('')
+    fireEvent.click(writer)
+    await waitFor(() => { expect(openChat).toHaveBeenCalledOnce() })
+    expect(f.viewSource.getSnapshot()).toMatchObject({ botFilter: id, session: sessionId })
+    fireEvent.click(screen.getByRole('button', { name: 'Editor' }))
+    await waitFor(() => { expect(f.openResources).toHaveBeenCalledOnce() })
+    expect(f.viewSource.getSnapshot()).toMatchObject({ session: '', botFilter: second, composeBot: second, section: 'agent' })
+    expect(f.posts()).toEqual([])
+  })
+  it.each(['missing', 'offline', 'wrong-id'] as const)('handles a %s current-session lookup while selecting another Bot', async (reason) => {
+    const f = fixture((req) => {
+      if (req.path.endsWith('/bots?limit=100')) return [{ id, name: 'Writer', state: 'active', latestRevision: 2 }]
+      if (req.path === base + '/sessions/' + sessionId) {
+        if (reason === 'missing') throw new CloudRequestFailure('SESSION_NOT_FOUND')
+        if (reason === 'offline') throw Error('offline')
+        return { id: other }
+      }
+      throw Error('unexpected lookup')
+    }, snapshot, [{ id: other, bot: { id, revision: 1 } }])
+    const openChat = vi.fn()
+    render(<CloudBotSidebar {...f} wide openChat={openChat} didNavigate={vi.fn()} toggleSidebar={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer' }))
+    if (reason === 'missing') {
+      await waitFor(() => expect(openChat).toHaveBeenCalledOnce())
+      expect(f.viewSource.getSnapshot()).toMatchObject({ session: other, botFilter: id })
+    } else {
+      await screen.findByRole('alert')
+      expect(openChat).not.toHaveBeenCalled()
+      expect(f.viewSource.getSnapshot()).toMatchObject({ session: sessionId, botFilter: '' })
+    }
+    expect(f.openResources).not.toHaveBeenCalled()
+    expect(f.posts()).toEqual([])
+  })
+  it('keeps the resource panel open when an earlier sidebar conversation lookup finishes', async () => {
+    const lookup = Promise.withResolvers<CloudValue>()
+    const f = fixture((req) => {
+      if (req.path.endsWith('/bots?limit=100')) return [{ id, name: 'Writer', state: 'active', latestRevision: 1 }]
+      if (req.path === base + '/sessions?limit=20&botId=' + id) return lookup.promise
+      if (req.path === base + '/sessions/' + sessionId) return { id: sessionId }
+      throw Error('unexpected lookup')
+    }, snapshot, { items: [], nextCursor: null })
+    const openChat = vi.fn(), didNavigate = vi.fn()
+    render(<CloudBotSidebar {...f} wide openChat={openChat} didNavigate={didNavigate} toggleSidebar={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer' }))
+    fireEvent.click(screen.getByRole('button', { name: zh.chatResources }))
+    await act(async () => { lookup.resolve({ items: [{ id: other, bot: { id, revision: 1 } }], nextCursor: null }) })
+    expect(f.openResources).toHaveBeenCalledOnce()
+    expect(didNavigate).toHaveBeenCalledOnce()
+    expect(openChat).not.toHaveBeenCalled()
+    expect(f.viewSource.getSnapshot().session).toBe(sessionId)
+    expect(f.posts()).toEqual([])
+  })
+  it('does not treat a capped legacy listing as proof that a Bot has no conversations', async () => {
+    const f = fixture((req) => {
+      if (req.path.endsWith('/bots?limit=100')) return [{ id, name: 'Writer', state: 'active', latestRevision: 1 }]
+      if (req.path.endsWith('/sessions/' + sessionId)) return { id: sessionId }
+      throw Error('unexpected lookup')
+    }, snapshot, Array.from({ length: 100 }, () => ({ id: randomUUID() })))
+    const openChat = vi.fn()
+    render(<CloudBotSidebar {...f} wide openChat={openChat} didNavigate={vi.fn()} toggleSidebar={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Writer' }))
+    await screen.findByText(zh.legacySessions)
+    expect(f.viewSource.getSnapshot().session).toBe(sessionId)
+    expect(openChat).not.toHaveBeenCalled()
+    expect(f.openResources).not.toHaveBeenCalled()
+    expect(f.posts()).toEqual([])
+  })
+  it('reads the pinned Bot first, and only inspects the latest revision on request', async () => {
+    const f = fixture((request) => {
+      if (request.path.endsWith('/binding')) return binding(sessionId)
+      if (request.path === base + '/bots/' + id) return { id, latestRevision: 4 }
+      if (request.path.includes('/revisions/')) {
+        const revision = Number(request.path.split('/').at(-1))
+        return { botId: id, revision, definition: { schemaVersion: 1, name: 'Writer', role: 'Editing',
+          instructions: 'Instructions v' + revision, requiredCapabilities: ['workspace.files'] } }
+      }
+      return { items: [], nextAfter: '0' }
+    }, snapshot, [{ id: sessionId, title: 'First', bot: { id, revision: 2 } }])
+    f.mount()
+    await draft('keep me')
+    expect(f.call.mock.calls.some(([r]) => r.path.includes('/revisions/'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: zh.chatBot + ' · v2' }))
+    await screen.findByText('Instructions v2')
+    fireEvent.click(screen.getByRole('button', { name: zh.botLatest }))
+    await screen.findByText('Instructions v4')
+    expect(screen.getByText(zh.botStillPinned + ' v2')).toBeTruthy()
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: zh.prompt }).value).toBe('keep me')
+    expect(f.posts()).toEqual([])
+    expect(f.viewSource.getSnapshot().session).toBe(sessionId)
+  })
+  it('rejects a mismatched publication and discards a late read after closing the inspector', async () => {
+    const late = Promise.withResolvers<CloudValue>()
+    let reads = 0
+    const def = { schemaVersion: 1, name: 'Writer', role: '', instructions: 'stale definition', requiredCapabilities: [] }
+    const f = fixture((request) => {
+      if (request.path.endsWith('/binding')) return binding(sessionId)
+      if (request.path.endsWith('/revisions/2')) return ++reads === 1 ? { botId: other, revision: 2, definition: def } : late.promise
+      return { items: [], nextAfter: '0' }
+    }, snapshot, [{ id: sessionId, title: 'First', bot: { id, revision: 2 } }])
+    f.mount()
+    const toggle = await screen.findByRole('button', { name: zh.chatBot + ' · v2' })
+    fireEvent.click(toggle); await screen.findByText(zh.botReadFailed)
+    expect(screen.queryByText('stale definition')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: zh.retry })); fireEvent.click(toggle)
+    await act(async () => { late.resolve({ botId: id, revision: 2, definition: def }) })
+    expect(screen.queryByRole('region', { name: zh.botInspect })).toBeNull()
+    expect(f.posts()).toEqual([])
+  })
+  it('keeps the bound conversation and draft when narrowing or clearing its Bot filter', async () => {
+    const secondBot = '10000000-0000-4000-8000-000000000010'
+    const f = fixture((request) => {
+      if (request.path.endsWith('/bots?limit=100')) return { items: [
+        { id, name: 'Research', state: 'active', latestRevision: 3 },
+        { id: secondBot, name: 'Editor', state: 'active', latestRevision: 1 },
+      ] }
+      if (request.path.endsWith('/binding')) return binding(sessionId)
+      return { items: [], nextAfter: '0' }
+    }, snapshot, [{ id: sessionId, title: 'First', bot: { id, revision: 2 } },
+      { id: other, title: 'Second', bot: { id: secondBot, revision: 1 } }])
+    f.mount()
+    await draft('continue this thread')
+    const filter = screen.getByRole('combobox', { name: zh.chatBotList })
+    for (const value of [id, '']) {
+      fireEvent.change(filter, { target: { value } })
+      expect(f.viewSource.getSnapshot().session).toBe(sessionId)
+      expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: zh.prompt }).value).toBe('continue this thread')
+      expect(screen.getByText(zh.chatBot + ' · v2')).toBeTruthy()
+    }
+    fireEvent.change(filter, { target: { value: secondBot } })
+    expect(f.viewSource.getSnapshot().session).toBe('')
+    expect(screen.queryByRole('textbox', { name: zh.prompt })).toBeNull()
+    expect(f.posts()).toEqual([])
+  })
   it('sends once to the fixed binding, streams deltas, cancels the known task and drains terminal events', async () => {
     const response = Promise.withResolvers<CloudValue>()
     let stage = 'empty'

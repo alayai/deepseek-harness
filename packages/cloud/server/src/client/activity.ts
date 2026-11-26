@@ -1,19 +1,21 @@
 /** Retain task references independently of the lifetime of a resource panel. */
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { DesktopOperationKind } from './desktop-target.ts'
 
 /** A submitted cloud write; missing id means the acceptance result is unknown. */
 export interface CloudActivity {
   readonly scope: string
   readonly path: string
   readonly key: string
-  readonly operation?: { readonly path: string; readonly id: string }
+  readonly operation?: { readonly path: string; readonly id: string; readonly desktopKind?: DesktopOperationKind }
 }
 
 /** Connection-owned task index; it contains references, never prompt bodies or tokens. */
 export interface CloudActivities {
   readonly source: ObservableSnapshot<Readonly<Record<string, CloudActivity | undefined>>>
   readonly remember: (activity: CloudActivity) => void
-  readonly accepted: (scope: string, key: string, operation: NonNullable<CloudActivity['operation']>) => void
+  readonly accepted: (scope: string, key: string, operation: NonNullable<CloudActivity['operation']>) => boolean
+  readonly rejected: (scope: string, key: string) => void
   readonly clear: () => void
 }
 
@@ -28,7 +30,12 @@ export function createCloudActivities(): CloudActivities {
     remember: (activity) => { source.set({ ...source.getSnapshot(), [activity.scope]: activity }) },
     accepted: (scope, key, operation) => {
       const entry = source.getSnapshot()[scope]
-      if (entry?.key === key) source.set({ ...source.getSnapshot(), [scope]: { ...entry, operation } })
+      if (entry?.key !== key) return false
+      source.set({ ...source.getSnapshot(), [scope]: { ...entry, operation } })
+      return true
+    },
+    rejected: (scope, key) => {
+      if (source.getSnapshot()[scope]?.key === key) source.set({ ...source.getSnapshot(), [scope]: undefined })
     },
     clear: () => { source.set({}) },
   }

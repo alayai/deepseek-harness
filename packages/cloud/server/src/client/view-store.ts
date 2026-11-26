@@ -10,12 +10,18 @@ interface CloudViewState {
   runtime: string
   credential: string
   session: string
+  botFilter: string
+  composeBot: string
+  botListVersion: number
+  botSetupVersion: number
+  botCreateVersion: number
   desktop: string
   section: CloudSection
 }
 
 function initial(): CloudViewState {
-  return { tenant: '', workspace: '', runtime: '', credential: '', session: '', desktop: '', section: 'overview' }
+  return { tenant: '', workspace: '', runtime: '', credential: '', session: '', desktop: '', section: 'overview',
+    botFilter: '', composeBot: '', botListVersion: 0, botSetupVersion: 0, botCreateVersion: 0 }
 }
 
 const actions = {
@@ -24,7 +30,22 @@ const actions = {
   workspace: (state: CloudViewState, value: string) => {
     Object.assign(state, initial(), { tenant: state.tenant, workspace: value, section: state.section })
   },
-  resource: (state: CloudViewState, key: 'runtime' | 'credential' | 'session' | 'desktop', value: string) => { state[key] = value },
+  resource: (state: CloudViewState, key: 'runtime' | 'credential' | 'session' | 'desktop' | 'composeBot', value: string) => {
+    if (key === 'runtime' && value !== state.runtime) state.desktop = ''
+    state[key] = value
+  },
+  filterBot: (state: CloudViewState, id: string, session: string) => { state.botFilter = id; state.session = session },
+  openBot: (state: CloudViewState, id: string, session: string) => {
+    Object.assign(state, { botFilter: id, composeBot: id, session })
+    if (!session) { state.section = 'agent'; state.botSetupVersion++ }
+  },
+  createdBot: (state: CloudViewState, id: string, session: string, filter: string, compose: string) => {
+    state.botListVersion++
+    if (state.session === session && state.botFilter === filter && state.composeBot === compose && state.section === 'agent')
+      Object.assign(state, { composeBot: id, botFilter: id, session: '' })
+  },
+  refreshBots: (state: CloudViewState) => { state.botListVersion++ },
+  createBot: (state: CloudViewState) => { state.section = 'agent'; state.botCreateVersion++ },
   section: (state: CloudViewState, value: CloudSection) => { state.section = value },
 }
 

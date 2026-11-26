@@ -60,6 +60,16 @@ describe('stream and replay recovery', () => {
     expect(() => cache.accept('a', '0', { items: [row('1', 'changed')], nextAfter: '1' })).toThrow('INVALID_EVENT_REPLAY')
     expect(() => cache.accept('a', '2', { items: [], nextAfter: '2' })).toThrow('STALE_EVENT_PAGE')
   })
+  it('verifies a resumed cursor without treating other session IDs as a gap', () => {
+    const cache = new CloudSessionReplay(), anchor = row('15', null), newer = row('31', null)
+    const old = cache.accept('a', '0', { items: [row('2', null), anchor], nextAfter: '15' })
+    cache.accept('b', '0', { items: [row('100', null)], nextAfter: '100' })
+    expect(cache.resume('a', old, { items: [anchor, newer], nextAfter: '31' })).toBe(true)
+    expect(cache.resume('a', old, { items: [newer], nextAfter: '31' })).toBe(false)
+    expect(cache.read('a').after).toBe('0')
+    expect(cache.read('b').after).toBe('100')
+  })
+
   it('rejects an oversized single event without advancing its cursor', () => {
     const cache = new CloudSessionReplay()
     expect(() => cache.accept('a', '0', { items: [row('1', { text: 'x'.repeat(2_000_000) })], nextAfter: '1' })).toThrow('EVENT_CACHE_ITEM_TOO_LARGE')
