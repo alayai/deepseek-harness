@@ -44,7 +44,7 @@ export async function nativeLogin(
     const address = listener.address()
     if (address === null || typeof address === 'string') throw new Error('CALLBACK_UNAVAILABLE')
     const redirect = `http://127.0.0.1:${address.port}/callback`
-    authorize(oidc.buildAuthorizationUrl(config, { redirect_uri: redirect, scope: 'openid profile email', state, nonce,
+    authorize(oidc.buildAuthorizationUrl(config, { redirect_uri: redirect, scope: 'openid profile email', state, nonce, prompt: 'login',
       code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256' }).href)
     const tokens = await oidc.authorizationCodeGrant(config, await callback.promise, {
       expectedState: state, expectedNonce: nonce, pkceCodeVerifier: verifier, idTokenExpected: true,

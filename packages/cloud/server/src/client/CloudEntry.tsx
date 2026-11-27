@@ -7,6 +7,13 @@ import type { CloudSource } from './source.ts'
 import type {} from './locales.ts'
 import css from './CloudPanel.module.css'
 
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** Optional action list in DS Bot's own sidebar footer. */
+    'bot.sidebar.action': { kind: 'list'; scope: 'root'; owner: { wide: boolean } }
+  }
+}
+
 /** State and navigation owned by the Client plugin, independent of any tab. */
 export interface CloudEntryInjected {
   hooks: { cloud: CloudSource }

@@ -51,6 +51,7 @@ describe('cloud UI composition and disposal', () => {
     core.register({ name: 'root', children: {
       'settings.section': { kind: 'list', scope: 'root' },
       'bot.sidebar.directory': { kind: 'single', scope: 'root' },
+      'bot.sidebar.action': { kind: 'list', scope: 'root' },
       'sidebar.footer.action': { kind: 'list', scope: 'root' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
       'main.conversation': { kind: 'single', scope: 'session-maybe' },
@@ -83,9 +84,10 @@ describe('cloud UI composition and disposal', () => {
       first.resolve({ ok: true, value: snapshot })
       await vi.waitFor(() => { expect(winner()).toBe(localComposer) })
       expect(mainWinner()).toBe(localConversation)
-      expect(entries).toHaveLength(5)
+      expect(entries).toHaveLength(6)
       const open = entries.find(entry => entry.name === 'sidebar.footer.action')?.inject?.().open
       expect(open).toBeTypeOf('function')
+      expect(entries.find(entry => entry.name === 'bot.sidebar.action')?.inject?.().open).toBe(open)
       open?.()
       expect(selectPanel).toHaveBeenCalledWith('dsh-cloud')
       expect(openTab).not.toHaveBeenCalled()

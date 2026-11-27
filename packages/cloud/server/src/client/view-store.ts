@@ -25,6 +25,9 @@ function initial(): CloudViewState {
 }
 
 const actions = {
+  restoreSelection: (state: CloudViewState, tenant: string, workspace: string) => {
+    if (!state.tenant && !state.workspace) Object.assign(state, { tenant, workspace })
+  },
   reset: (state: CloudViewState) => { Object.assign(state, initial()) },
   tenant: (state: CloudViewState, value: string) => { Object.assign(state, initial(), { tenant: value, section: state.section }) },
   workspace: (state: CloudViewState, value: string) => {
@@ -53,7 +56,7 @@ const actions = {
 export type CloudViewStore = EngineStoreInstance<CloudViewState, typeof actions>
 
 /**
- * Create navigation retained in memory for one Client connection. No browser persistence is used.
+ * Create navigation retained in memory for one Client connection. Verified defaults are applied by its owner.
  * @returns the selection source shared by the main page and right-sidebar views.
  */
 export function createCloudViewStore(): CloudViewStore {

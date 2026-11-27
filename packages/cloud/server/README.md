@@ -9,7 +9,9 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Sign in to dsh-server from the DSH cloud entry to work with cloud resources. Local mode preserves the existing DSH workflow. Starting sign-in stops local tasks and blocks new local business calls. Cloud failures pause execution until you reconnect or explicitly sign out; they never select local execution.
+When DS Bot displays its team sidebar, use the DSH cloud button at the bottom of that sidebar to sign in or reopen cloud resources.
+
+Sign in to dsh-server from the DSH cloud entry to work with cloud resources. Starting sign-in stops local tasks and asks the identity provider to authenticate you again. An unavailable Worker blocks the affected operation; you can still select a tenant or workspace. An expired or revoked login pauses cloud access until you reconnect or explicitly sign out. Neither case switches execution to local.
 
 ## Table of Contents
 

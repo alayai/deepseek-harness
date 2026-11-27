@@ -65,6 +65,29 @@ const draft = async (value: string) => {
 }
 
 describe('cloud main conversation', () => {
+  it('wakes on the receipt and shows committed text while keeping task status reads at their normal rate', async () => {
+    vi.useFakeTimers()
+    let accepted = false, textReady = false, reads = 0
+    const f = fixture((req) => {
+      if (req.path.endsWith('/binding')) return binding(sessionId)
+      if (req.path.endsWith('/prompts')) { accepted = true; return turn }
+      if (req.path.endsWith('/operations/' + id)) { reads++; return operation('running') }
+      if (req.path.endsWith('?after=0') && accepted && textReady)
+        return { items: [event(1, 'cloud/assistant-delta', { streamId: 's', text: 'stream has started' })], nextAfter: '1' }
+      return { items: [], nextAfter: req.path.split('=').at(-1)! }
+    })
+    try {
+      await act(async () => { f.mount() })
+      fireEvent.change(screen.getByRole('textbox', { name: zh.prompt }), { target: { value: 'start' } })
+      await act(async () => { fireEvent.click(submit()) })
+      expect(reads).toBe(1) // no clock advance: receipt interrupted the idle timer
+      textReady = true
+      await act(async () => { await vi.advanceTimersByTimeAsync(350) })
+      expect(screen.getByText('stream has started')).toBeTruthy()
+      expect(reads).toBe(1)
+      expect(f.posts()).toHaveLength(1)
+    } finally { cleanup(); vi.useRealTimers() }
+  })
   it('loads an older conversation on retry without changing the draft or submitting a turn', async () => {
     let reads = 0
     const f = fixture((req) => {
@@ -279,7 +302,8 @@ describe('cloud main conversation', () => {
     stage = 'terminal'
     await screen.findByText('Final cloud reply', {}, { timeout: 3500 })
     expect(screen.queryByText('Partial reply')).toBeNull()
-    expect(screen.getByText(zh.chatCancelled)).toBeTruthy()
+    // The final text may already be visible before the original operation confirms cancellation.
+    await screen.findByText(zh.chatCancelled, {}, { timeout: 3500 })
     expect(f.call).toHaveBeenCalledWith(expect.objectContaining({ path: expect.stringContaining('?after=100') as string }))
   })
 

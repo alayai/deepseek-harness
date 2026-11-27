@@ -68,6 +68,16 @@ describe('Host-owned cloud target', () => {
     await expect(pending).rejects.toMatchObject({ code: 'STALE_CLOUD_RESULT' })
     expect(cloud.snapshot().mode).toBe('cloud-suspended')
   })
+  it('keeps tenant selection available when the desktop Worker is down, without replaying the allocation', async () => {
+    const fetcher = vi.fn<typeof fetch>(async input => inputUrl(input).endsWith('/desktops')
+      ? Response.json({ error: { code: 'WORKER_UNAVAILABLE' } }, { status: 503 })
+      : Response.json({ data: inputUrl(input).endsWith('/me/tenants') ? [] : policy }))
+    const { cloud } = fixture({ fetcher })
+    await connected(cloud)
+    await expect(cloud.request({ ...request(cloud), method: 'POST', path: '/tenants/t/workspaces/w/desktops', idempotencyKey: 'allocate-once' })).rejects.toMatchObject({ code: 'WORKER_UNAVAILABLE' })
+    await expect(cloud.request(request(cloud))).resolves.toEqual([])
+    expect(fetcher.mock.calls.filter(([input]) => inputUrl(input).endsWith('/desktops'))).toHaveLength(1)
+  })
   it('does not turn ordinary validation rejection into a login reset', async () => {
     const { cloud } = fixture({ fetcher: async input => (inputUrl(input).endsWith('/server-info') || inputUrl(input).endsWith('/me')) ? new Response(JSON.stringify({ data: policy })) : new Response(JSON.stringify({ error: { code: 'VERSION_CONFLICT' } }), { status: 409 }) })
     await connected(cloud)

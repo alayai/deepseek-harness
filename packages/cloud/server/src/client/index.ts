@@ -20,6 +20,7 @@ import { CloudChatTurns, CloudRequestFailure } from './chat-turns.ts'
 import { CloudPanel, type CloudPanelInjected } from './CloudPanel.tsx'
 import { createCloudSource } from './source.ts'
 import { createCloudViewStore } from './view-store.ts'
+import { rememberWorkspace } from './workspace-default.ts'
 import { CloudArtifactReceipts } from './CloudArtifacts.tsx'
 import { CloudFileState } from './CloudFiles.tsx'
 import { CloudSessionReplay } from './session-replay.ts'
@@ -63,7 +64,8 @@ function registerUi(ctx: Context): void {
       popup.location.href = snapshot.authorizationUrl
       popup = null
     }
-    if ((mode === 'local' || mode === 'authenticating') && mode !== previous.mode) {
+    if (((mode === 'local' || mode === 'authenticating') && mode !== previous.mode) ||
+      (mode === 'cloud' && (previous.mode !== 'cloud' || snapshot.epoch !== previous.epoch))) {
       store.actions.reset()
       activities.clear(); replay.clear(); artifacts.clear()
     }
@@ -84,6 +86,7 @@ function registerUi(ctx: Context): void {
     }
     return result.value
   }
+  ctx.effect(() => rememberWorkspace(source.source, store, call), 'cloud: remember verified workspace')
   const goToChat = () => { ctx.layout.selectPanel(null) }
   const injectPanel = (): CloudPanelInjected => ({
     artifacts, files, taskReceipts, openChat: goToChat,
@@ -175,10 +178,10 @@ function registerUi(ctx: Context): void {
     title: () => t('title'),
     guide: [{ id: TAB_KIND, order: 35, title: () => t('title'), description: () => t('guide'), icon: IconGlobeOutlineRegular }],
   }), 'cloud: resource tab type')
-  ctx.effect(() => ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action', id: 'dsh-cloud', locale: 'dsh.cloud',
+  for (const name of ['sidebar.footer.action', 'bot.sidebar.action'] as const) ctx.effect(() => ctx.slots.inject(name, () => ctx.slots.register({
+    name, id: 'dsh-cloud', locale: 'dsh.cloud',
     inject: () => ({ hooks: { cloud: source.source }, open }),
-  }, CloudEntry)), 'cloud: sidebar.footer.action')
+  }, CloudEntry)), `cloud: ${name}`)
   ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main', key: PANEL_ID, locale: 'dsh.cloud', inject: injectPanel,
   }, CloudPanel)), 'cloud: main')

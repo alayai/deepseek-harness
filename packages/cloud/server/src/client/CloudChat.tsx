@@ -266,9 +266,13 @@ function Conversation({
       }
       return false
     }
-    let lastBindingRead = -Infinity
+    let lastBindingRead = -Infinity, lastOperationRead = -Infinity, lastReceipt: string | undefined
+    let reading = false, wakePending = false
     const tick = async () => {
       if (!valid()) return
+      reading = true
+      wakePending = false
+      let failed = false
       try {
         // Read terminal state first, then drain committed events, including the final reply.
         if (Date.now() - lastBindingRead >= 8000) {
@@ -278,24 +282,41 @@ function Conversation({
           lastBindingRead = Date.now()
         }
         // Keep the history visible even if an individual operation read fails.
-        const operation = await adapter.poll().then(() => true, () => false)
+        const receipt = adapter.attempt()?.receipt?.id
+        if (receipt && (receipt !== lastReceipt || Date.now() - lastOperationRead >= 1100)) {
+          lastReceipt = receipt
+          lastOperationRead = Date.now()
+          await adapter.poll().catch(() => { failed = true })
+        }
         const drained = await readEvents()
         if (valid()) {
           setCheckingHistory(!drained)
-          setReadFailed(!operation)
+          setReadFailed(failed)
         }
       } catch {
-        verifyTail = true
+        failed = true; verifyTail = true
         if (valid()) setReadFailed(true)
       } finally {
+        reading = false
         if (valid()) {
-          const state = adapter.attempt()?.operation?.state
-          timer = setTimeout(() => { void tick() }, settled(adapter.attempt()) || state === 'unknown' ? 2400 : 1100)
+          const attempt = adapter.attempt(), state = attempt?.operation?.state ?? attempt?.receipt?.state
+          const active = state === 'running' || state === 'queued'
+          timer = setTimeout(() => { void tick() }, wakePending ? 0 : failed ? 2400 : active ? 350 : 2400)
         }
       }
     }
+    // Wake once for a new receipt. Status notifications for the same operation must not start another loop.
+    let observedReceipt = adapter.attempt()?.receipt?.id
+    const unsubscribe = turns.subscribe(() => {
+      const receipt = adapter.attempt()?.receipt?.id
+      if (!valid() || receipt === observedReceipt) return
+      observedReceipt = receipt
+      if (!receipt) return
+      if (reading) wakePending = true
+      else { clearTimeout(timer); void tick() }
+    })
     void tick()
-    return () => { live = false; if (timer !== undefined) clearTimeout(timer) }
+    return () => { live = false; unsubscribe(); if (timer !== undefined) clearTimeout(timer) }
   }, [adapter, revision])
 
   useLayoutEffect(() => {

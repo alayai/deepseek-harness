@@ -108,7 +108,9 @@ export class CloudConnection {
       if (!this.current(request.epoch) || this.snapshot().mode !== 'cloud') throw new CloudApiError('STALE_CLOUD_RESULT', 409)
       return value
     } catch (error) {
-      if (this.current(request.epoch)
+      const unavailableFeature = error instanceof CloudApiError && error.status === 503 &&
+        ['WORKER_UNAVAILABLE', 'DESKTOP_UNAVAILABLE', 'SERVICE_NOT_ENABLED'].includes(error.code)
+      if (this.current(request.epoch) && !unavailableFeature
         && (!(error instanceof CloudApiError) || error.status === 401 || error.status === 403 || error.status >= 500)) {
         this.suspend(error instanceof CloudApiError ? error.code : 'CONNECTION_LOST')
       }
