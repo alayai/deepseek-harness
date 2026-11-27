@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, bindSnapshotSelector, contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { CloudPanel, type CloudPanelProps } from '../src/client/CloudPanel.tsx'
 import { CloudModels } from '../src/client/CloudModels.tsx'
 import { RuntimeReceipts } from '../src/client/runtime-receipts.ts'
@@ -14,6 +15,16 @@ import { createCloudActivities } from '../src/client/activity.ts'
 import { CloudRequestFailure } from '../src/client/chat-turns.ts'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+const useResource = (() => ({
+  status: 'none' as const, value: undefined, failure: undefined, reload: () => {},
+})) as GlobalStandardProps['useResource']
+const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({ activePanelId: null })
+const unusedHook = (() => { throw new Error('unused by CloudModels') }) as never
+const globalSeat = {
+  useSessions: unusedHook, useSessionStatus: unusedHook, usePanelInfo,
+  useSessionRetainInfo: () => undefined, useResource, useWorkspaces: unusedHook,
+  ...allowAllAccess, useContextMenu: contextMenuHook(),
+}
 function props(mode: CloudSnapshot['mode'] = 'local', epoch = 8): CloudPanelProps {
   const snapshot: CloudSnapshot = { mode, epoch, serverUrl: 'http://localhost:17800', authorizationUrl: null, error: null }
   const store = createCloudViewStore(), activities = createCloudActivities()
@@ -793,10 +804,10 @@ describe('cloud workspace UI', () => {
       if (req.path.includes('/two/')) return Array.from({ length: 100 }, (_, i) => row('Legacy ' + i))
       return { items: [row('First model')], nextCursor: 'old' }
     })
-    const settings = <CloudModels {...f} close={vi.fn()} manage={vi.fn()} />
+    const settings = <CloudModels {...f} {...globalSeat} close={vi.fn()} manage={vi.fn()} />
     const ui = render(settings)
     fireEvent.click(await screen.findByRole('button', { name: zh.moreModels }))
-    f.viewActions.workspace('two'); ui.rerender(<CloudModels {...f} close={vi.fn()} manage={vi.fn()} />)
+    f.viewActions.workspace('two'); ui.rerender(<CloudModels {...f} {...globalSeat} close={vi.fn()} manage={vi.fn()} />)
     await screen.findByText(zh.legacyModels)
     delayed.resolve({ items: [row('Wrong workspace')], nextCursor: null })
     await waitFor(() => expect(screen.getByText('Legacy 99')).toBeTruthy())
