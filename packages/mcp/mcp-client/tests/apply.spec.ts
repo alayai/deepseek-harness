@@ -245,6 +245,8 @@ describe('apply (plugin lifecycle)', () => {
       closeTimeoutMs: 5_000,
       expandTemplates: false,
       failOnStartupError: true,
+      toolLoading: 'eager',
+      catalogDescriptionMaxLength: 160,
     })
     expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
       new URL('https://mcp.example.test/rpc'),
@@ -263,6 +265,8 @@ describe('apply (plugin lifecycle)', () => {
       closeTimeoutMs: 5_000,
       expandTemplates: false,
       failOnStartupError: true,
+      toolLoading: 'eager',
+      catalogDescriptionMaxLength: 160,
     })).rejects.toThrow('supplied programmatically')
     expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
   })
@@ -278,6 +282,8 @@ describe('apply (plugin lifecycle)', () => {
       closeTimeoutMs: 5_000,
       expandTemplates: false,
       failOnStartupError: true,
+      toolLoading: 'eager',
+      catalogDescriptionMaxLength: 160,
     })).rejects.toThrow('supplied programmatically')
     expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
   })
